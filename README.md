@@ -64,10 +64,13 @@ columns:
 SPEC 	- the object spectrum
 SKYSPEC - the spectrum of the sky
 LAMBDA	- the wavelength scale corresponding to both of the above (in Angstroms)
- 
 
+## Things which can/should be improved/added
+* flat fielding
+* extraction (not optimal at the moment)
+* spectrophotometric calibration using a standard (not implemented)
 
-
-
-
+## Comments, bug reports, help, suggestions etc..
+Please contact Matt Hilton (hiltonm@ukzn.ac.za). I am happy to tweak this to work with as many
+gratings combinations as needed, but will need data to work with (and time).
 
