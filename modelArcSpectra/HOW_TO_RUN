@@ -1,0 +1,2 @@
+python createModelSpectrum.py testArc1.fits PG1800_Ne_2xBin.txt RefModel_PG1800_Ne_2xBin.pickle
+
