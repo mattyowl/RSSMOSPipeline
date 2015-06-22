@@ -40,7 +40,7 @@ should contain the contents of the `product/` dir, as provided by SALT.
 3.  Run the code, e.g.,
 
     ```
-    python rss\_mos\_reducer.py rawData reducedData maskName
+    python rss_mos_reducer.py rawData reducedData maskName
     ```
 
     You can find maskName from the FITS headers for your data - look for the `MASKID` keyword.
