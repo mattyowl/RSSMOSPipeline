@@ -61,12 +61,12 @@ should contain the contents of the `product/` dir, as provided by SALT.
     `masterFlat_?.fits` file(s) and the corresponding DS9 region file(s) (ending .reg) in the `reducedData/`
     directory.
 
-    The 1d spectra are in FITS table format (stored in the extension `1D_SPECTRUM` with the following 
+    The 1d spectra are in FITS table format (stored in the extension `1D_SPECTRUM`) with the following 
     columns:
 
-    `SPEC` 		- the object spectrum
-    `SKYSPEC` 	- the spectrum of the sky
-    `LAMBDA`	- the wavelength scale corresponding to both of the above (in Angstroms)
+    * `SPEC` 		- the object spectrum
+    * `SKYSPEC` 	- the spectrum of the sky
+    * `LAMBDA`	- the wavelength scale corresponding to both of the above (in Angstroms)
 
 ## Things which can/should be improved/added
 * flat fielding (polynomial fit probably not optimal)
@@ -74,6 +74,6 @@ should contain the contents of the `product/` dir, as provided by SALT.
 * spectrophotometric calibration using a standard (not implemented)
 
 ## Comments, bug reports, help, suggestions etc..
-Please contact Matt Hilton (hiltonm@ukzn.ac.za). I am happy to tweak this to work with as many
+Please contact Matt Hilton <hiltonm@ukzn.ac.za>. I am happy to tweak this to work with as many
 gratings combinations as needed, but will need data to work with (and time).
 
