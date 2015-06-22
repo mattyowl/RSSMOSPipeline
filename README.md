@@ -25,7 +25,7 @@ IPython is used for debugging, but isn't needed to run the pipeline. So you can 
 ```python
 import IPython
 ``` 
-from the rss\_mos\_reducer.py script if you don't want to install IPython.
+from the `rss_mos_reducer.py` script if you don't want to install IPython.
 
 Instead of pyfits and atpy, astropy can potentially be used, but this isn't implemented yet.
 
