@@ -305,7 +305,6 @@ def findSlits(flatFileName):
     
     """ 
     
-    #---
     img=pyfits.open(flatFileName)
     d=img['SCI'].data
     
@@ -348,8 +347,47 @@ def findSlits(flatFileName):
             yMin=None
             yMax=None
     
-    #IPython.embed()
-    #sys.exit()
+    # Slits can be bendy: measure the bendiness 
+    # above routine misses large chunks of red end of bendy slits at top of mask
+    # if we can just cut out a larger slitlet, the rectification / wavelength calibration can handle unbending
+    # Note: below doesn't work...
+    #xSlitsDict={}
+    
+    #xBinStep=50
+    #xBinEdges=[]
+    #for i in range(d.shape[1]/xBinStep):
+        #xBinEdges.append(i*xBinStep)
+    
+    #for key in slitsDict.keys():
+        #xSlitsDict[key]={}
+        #xSlitsDict[key]['x']=[]
+        #xSlitsDict[key]['yMin']=[]
+        #xSlitsDict[key]['yMax']=[]
+        #for i in range(len(xBinEdges)-1):
+            
+            #xMin=xBinEdges[i]
+            #xMax=xBinEdges[i+1]
+            #x=(xMin+xMax)/2
+            
+            ## Use grad to find edges, skip chip gaps
+            #prof=np.median(d[:, xMin:xMax], axis = 1)
+            #if np.sum(prof) > 0:
+                #xSlitsDict[key]['x'].append(x)
+                #grad=np.gradient(prof)
+                ##y=(slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2
+                #diffMin=abs(np.where(grad > 0.1)[0]-slitsDict[key]['yMin'])
+                #yMin=np.where(grad > 0.1)[0][np.where(diffMin == diffMin.min())[0][0]]
+                #diffMax=abs(np.where(grad < -0.1)[0]-slitsDict[key]['yMax'])
+                #yMax=np.where(grad < -0.1)[0][np.where(diffMax == diffMax.min())[0][0]]            
+                #xSlitsDict[key]['yMin'].append(yMin)
+                #xSlitsDict[key]['yMax'].append(yMax)
+    
+    ## For now, just cut within max(yMax), min(yMin) and rely on rectify step to unbend
+    #for key in xSlitsDict:
+        #xSlitsDict[key]['yMin']=min(xSlitsDict[key]['yMin'])
+        #xSlitsDict[key]['yMax']=max(xSlitsDict[key]['yMax'])
+        #del xSlitsDict[key]['x']
+    #slitsDict=xSlitsDict
     
     #---
     # Below works on A3827 - delete once tested with new algorithm
@@ -889,11 +927,9 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
             for y in range(data.shape[0]):
                 try:
                     tck=interpolate.splrep(wavelengthsMap[y], data[y])
+                    rectifiedData[y]=interpolate.splev(rectWavelengthsMap[y], tck, ext = 1)
                 except:
-                    print "splrep error"
-                    IPython.embed()
-                    sys.exit()
-                rectifiedData[y]=interpolate.splev(rectWavelengthsMap[y], tck, ext = 1)
+                    print "WARNING: splrep error, this slit will be blank"
             img[extension].data=rectifiedData
             header['CTYPE1']='LINEAR'
             header['DISPAXIS']=1
@@ -1197,12 +1233,15 @@ def extractAndStackSpectra(maskDict, outDir):
             wavelengthsList.append(w)
             
             # Extract signal, sky
-            signal, sky=weightedExtraction(data)
-            #if extension == 'SLIT9':    # SLIT15 for BCG
-                #IPython.embed()
-                #sys.exit()
-            signalList.append(signal)
-            skyList.append(sky)
+            # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
+            if np.nonzero(data)[0].shape[0] > 0:
+                signal, sky=weightedExtraction(data)
+                signalList.append(signal)
+                skyList.append(sky)
+            else:
+                print "WARNING: empty slit"
+                signalList.append(np.zeros(data.shape[1]))
+                skyList.append(np.zeros(data.shape[1]))
         
         # Make stacked spectrum - interpolate onto common wavelength scale, then take median
         # We could make this fancier (noise weighting etc.)...
