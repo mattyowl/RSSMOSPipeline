@@ -298,9 +298,11 @@ def cutSlits(inFileName, outFileName, slitsDict):
     newImg.close()
     
 #-------------------------------------------------------------------------------------------------------------
-def findSlits(flatFileName):
-    """Our replacement for the specslit, which seems no longer to give sensible output on the 2012B data.
-        
+def findSlits(flatFileName, minSlitHeight = 10):
+    """Find the slits, without using any info from the mask design file...
+    
+    minSlitHeight is used to throw out any problematic weird too-narrow slits (if any)
+    
     Returns a dictionary which can be fed into cutSlits
     
     """ 
@@ -337,7 +339,7 @@ def findSlits(flatFileName):
             if minusMask[i] == True:
                 yMax=i
                 lookingFor=1
-        if yMin != None and yMax != None:
+        if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
             # Does this need deblending?
             #if yMin > 1360 and yMax < 1480:
                 #IPython.embed()
@@ -1037,6 +1039,10 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     
     So, for the actual extraction, we're using masked array median. There is room for improvement here...
 
+    Returns extracted signal, sky (both 1d) and 2d masked array of data with CRs flagged
+    We also fill CR-flagged pixels with median sky (in case want to regrid later for using
+    other extraction methods)
+    
     """
 
     # Throw away rows at edges as these often contain noise
@@ -1175,6 +1181,16 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     
     signal=signalPlusSky-sky
     
+    # We'll return masked array of the data - this has only CRs flagged (with 1s)
+    mData=np.ma.masked_array(data, wn2d)
+
+    # Fix masked values by filling with median sky
+    # This works better than sklearn.imputer
+    # skyFill masked values correspond only to the chip gaps
+    skyFill=np.ma.median(mData, axis = 0)
+    for i in range(mData.shape[0]):
+        mData[i][mData[i].mask]=skyFill[mData[i].mask]
+                
     # Biweight
     #bsSky=[]
     #bsSignalPlusSky=[]
@@ -1187,7 +1203,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     #bsSignalPlusSky[np.isnan(bsSignalPlusSky)]=0.0
     #bsSignal=bsSignalPlusSky-bsSky
     
-    return signal, sky
+    return signal, sky, mData
 
 #-------------------------------------------------------------------------------------------------------------
 def extractAndStackSpectra(maskDict, outDir):
@@ -1220,6 +1236,8 @@ def extractAndStackSpectra(maskDict, outDir):
         signalList=[]
         skyList=[]
         wavelengthsList=[]
+        headersList=[]
+        CRMaskedDataCube=[]
         for fileName in toStackList:
             
             img=pyfits.open(fileName)
@@ -1232,12 +1250,14 @@ def extractAndStackSpectra(maskDict, outDir):
                 raise Exception, "wavelength of pixel 0 doesn't correspond to CRVAL1 - what happened?"
             wavelengthsList.append(w)
             
-            # Extract signal, sky
+            # Extract signal, sky and CR-flagged 2d spectrum data
             # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
             if np.nonzero(data)[0].shape[0] > 0:
-                signal, sky=weightedExtraction(data)
+                signal, sky, mData=weightedExtraction(data)
                 signalList.append(signal)
                 skyList.append(sky)
+                headersList.append(header)
+                CRMaskedDataCube.append(mData)
             else:
                 print "WARNING: empty slit"
                 signalList.append(np.zeros(data.shape[1]))
@@ -1253,12 +1273,12 @@ def extractAndStackSpectra(maskDict, outDir):
         regrid_skyArr=np.zeros(skyArr.shape)
         for i in range(signalArr.shape[0]):
             tck=interpolate.splrep(wavelengthsArr[i], signalArr[i])
-            regrid_signalArr[i]=interpolate.splev(wavelength, tck)
+            regrid_signalArr[i]=interpolate.splev(wavelength, tck, ext = 1)
             tck=interpolate.splrep(wavelengthsArr[i], skyArr[i])
-            regrid_skyArr[i]=interpolate.splev(wavelength, tck)            
+            regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
         sky=np.median(regrid_skyArr, axis = 0)
-        
+            
         # Output as .fits tables, one per slit
         specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
         skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
@@ -1268,29 +1288,86 @@ def extractAndStackSpectra(maskDict, outDir):
         HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
         outFileName=onedspecDir+os.path.sep+maskDict['maskName']+"_"+maskDict['objectName'].replace(" ", "_")+"_"+extension+".fits"
         HDUList.writeto(outFileName, clobber=True)
+
+        # Alternative extraction method
+        # NOTE: less effective than above ^^^
+        #if extension == 'SLIT9': # for P001788N07
+
+        # NOTE: These all have different wavelength calibrations stored in wavelengthsList
+        # So project onto common wavelength scale (having corrected CRs with median sky)
+        CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
+        projDataCube=[]
+        refWavelengths=None
+        refHeader=None
+        for data, wavelengths, header in zip(CRMaskedDataCube, wavelengthsList, headersList):
+            if refWavelengths == None:
+                refWavelengths=w
+                refHeader=header
+            if projDataCube == []:
+                projDataCube.append(data)
+            else:
+                projData=np.zeros(projDataCube[0].shape)
+                for i in range(min([projData.shape[0], data.shape[0]])):
+                    tck=interpolate.splrep(w, data.data[i])
+                    projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
+                projDataCube.append(projData)
+        projDataCube=np.array(projDataCube)
+        
+        # Unravel the dataCube so we can try PCA or something
+        # This is a great way to see shifts in wavelength calib across the stack
+        reshaped=np.reshape(projDataCube, [projDataCube.shape[0]*projDataCube.shape[1], projDataCube.shape[2]])
+        
+        # This really doesn't work
+        #from sklearn import decomposition            
+        #pca=decomposition.PCA(n_components = 3)
+        #pca.fit(reshaped)
+        #plt.plot(refWavelengths, ndimage.uniform_filter1d(pca.components_[0], 15))
+
+        # Just stack and then extract like we were before...
+        med=np.median(projDataCube, axis = 0)            
+        signal, sky, mData=weightedExtraction(med)
+        
+        # Output as .fits tables, one per slit
+        specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
+        skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
+        lambdaColumn=pyfits.Column(name='LAMBDA', format='D', array=refWavelengths)
+        tabHDU=pyfits.new_table([specColumn, skyColumn, lambdaColumn])
+        tabHDU.name='1D_SPECTRUM'
+        HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
+        outFileName=onedspecDir+os.path.sep+maskDict['maskName']+"_"+maskDict['objectName'].replace(" ", "_")+"_"+extension+"_altExtract.fits"
+        HDUList.writeto(outFileName, clobber=True)
+            
+        #---
+            
    
 #-------------------------------------------------------------------------------------------------------------
 # Main
 if len(sys.argv) < 4:
     print "Run: % rss_mos_reducer.py rawDir reducedDir maskName"
+    print "Use maskName = 'all' to reduce all masks found under rawDir/"
+    print "    maskName = 'list' to list all masks found under rawDir/"
 else:
 
     # There will be a UI ultimately
     rawDir=sys.argv[1]
-    baseOutDir=sys.argv[2].replace("\n", "")
-
+    baseOutDir=sys.argv[2]
+    maskID=sys.argv[3]
+    
     if os.path.exists(baseOutDir) == False:
         os.makedirs(baseOutDir)
     
     # Sort out what's what...
     infoDict=getImageInfo(rawDir)
     
-    maskID=sys.argv[3]
-    shortDict={}
-    for key in infoDict.keys():
-        if key == maskID:
-            shortDict[key]=infoDict[key]
-    infoDict=shortDict
+    if maskID == 'list':
+        print "Masks found: %s" % (str(infoDict.keys()))
+        sys.exit()
+    elif maskID != 'all':
+        shortDict={}
+        for key in infoDict.keys():
+            if key == maskID:
+                shortDict[key]=infoDict[key]
+        infoDict=shortDict
     
     # We're organised by the mask, reduce each in turn
     for maskID in infoDict.keys():  # try more complicated case first
