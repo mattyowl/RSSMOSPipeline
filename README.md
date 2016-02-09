@@ -46,13 +46,30 @@ should contain the contents of the `product/` dir, as provided by SALT.
     ```
 
     You can find maskName from the FITS headers for your data - look for the `MASKID` keyword.
-
+    
     So, for example if your data were taken with a mask called P000807N01 and live in a directory
     called `ACTTest` then you would run the pipeline with:
 
     ```
     python rss_mos_reducer.py ACTTest reducedACTTest P000807N01
     ```
+    
+    If you want to just list the masks found under a directory called `product` (without doing anything
+    with the data) you can use:
+    
+    ```
+    python rss_mos_reducer.py product reduced list
+    ```
+    
+    And if you're super confident that nothing can go wrong, you can ask the pipeline to process
+    data for all the masks it can find (in this case, under the `product` directory)
+    
+    ```
+    python rss_mos_reducer.py product reduced all
+    ```
+    
+    The processed data from each mask will be found in its own subdirectory under `reduced/` in the above
+    example.
 
 4.  After the pipeline has finished, you will find data at various stages of reduction under the
 `   reducedData` dir (`reducedACTTest` for the above example). At the moment, this is not cleaned up.
