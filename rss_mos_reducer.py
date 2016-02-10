@@ -1079,7 +1079,11 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     if xMax > len(prof)-1:
         xMax=len(prof)-1
     prof[:xMin]=0.0
-    prof[xMax:]=0.0    
+    prof[xMax:]=0.0  
+
+    # First pass guess at profile
+    #res=data-np.array([np.median(data, axis = 0)]*data.shape[0])
+    #prof=np.median(res, axis = 1)
     
     # Fit/extract signal, sky (but really this is just a good way to find and mask cosmic rays)
     wn2d=np.zeros(data.shape)+chipGapMask               # Treat chip gaps as noise
@@ -1156,30 +1160,33 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
         #sigma=sigmaRange[np.where(resArr == resArr.min())]/2
         #prof=np.exp(-((x-x0)**2)/(2*sigma**2))
 
+    #---
     # Use masked array median - this actually seems to work better than what we were doing...
     # NOTE: mask values of 1 are excluded, 0 included
     # Room for improvement here (e.g., optimize traceHalfWidth for each object)
-    traceHalfWidth=4
-    prof=np.median(data, axis = 1)
-    peakIndex=np.where(prof == prof.max())[0]
-    x=np.arange(len(prof))
-    xMin=peakIndex-traceHalfWidth
-    if xMin < 0:
-        xMin=0
-    xMax=peakIndex+traceHalfWidth
-    if xMax > len(prof)-1:
-        xMax=len(prof)-1
-    prof[:xMin]=0.0
-    prof[xMax:]=0.0
+    #traceHalfWidth=4
+    #prof=np.median(data, axis = 1)
+    #peakIndex=np.where(prof == prof.max())[0]
+    #x=np.arange(len(prof))
+    #xMin=peakIndex-traceHalfWidth
+    #if xMin < 0:
+        #xMin=0
+    #xMax=peakIndex+traceHalfWidth
+    #if xMax > len(prof)-1:
+        #xMax=len(prof)-1
+    #prof[:xMin]=0.0
+    #prof[xMax:]=0.0
     
-    skyMask=np.array([np.greater(prof, 0)]*data.shape[1], dtype = int).transpose()
-    signalMask=np.array([np.equal(prof, 0)]*data.shape[1], dtype = int).transpose()
-    mSky2d=np.ma.masked_array(data, skyMask+wn2d)
-    mSignalPlusSky2d=np.ma.masked_array(data, signalMask+wn2d)
-    sky=np.ma.median(mSky2d, axis = 0)
-    signalPlusSky=np.ma.median(mSignalPlusSky2d, axis = 0)
+    #skyMask=np.array([np.greater(prof, 0)]*data.shape[1], dtype = int).transpose()
+    #signalMask=np.array([np.equal(prof, 0)]*data.shape[1], dtype = int).transpose()
+    #mSky2d=np.ma.masked_array(data, skyMask+wn2d)
+    #mSignalPlusSky2d=np.ma.masked_array(data, signalMask+wn2d)
+    #sky=np.ma.median(mSky2d, axis = 0)
+    #signalPlusSky=np.ma.median(mSignalPlusSky2d, axis = 0)
     
-    signal=signalPlusSky-sky
+    #signal=signalPlusSky-sky
+    
+    #---
     
     # We'll return masked array of the data - this has only CRs flagged (with 1s)
     mData=np.ma.masked_array(data, wn2d)
@@ -1241,27 +1248,36 @@ def extractAndStackSpectra(maskDict, outDir):
         for fileName in toStackList:
             
             img=pyfits.open(fileName)
-            data=img[extension].data
-            header=img[extension].header
+            foundExtension=False
+            try:
+                data=img[extension].data
+                foundExtension=True
+            except KeyError:
+                print "... WARNING: missing %s in %s ..." % (extension, fileName)
+                foundExtension=False
             
-            # Extract calibrated wavelength scale, assuming left most pixel corresponds to CRVAL1
-            w=np.arange(data.shape[1])*header['CDELT1']+header['CRVAL1']
-            if w[0] != header['CRVAL1']:
-                raise Exception, "wavelength of pixel 0 doesn't correspond to CRVAL1 - what happened?"
-            wavelengthsList.append(w)
-            
-            # Extract signal, sky and CR-flagged 2d spectrum data
-            # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
-            if np.nonzero(data)[0].shape[0] > 0:
-                signal, sky, mData=weightedExtraction(data)
-                signalList.append(signal)
-                skyList.append(sky)
-                headersList.append(header)
-                CRMaskedDataCube.append(mData)
-            else:
-                print "WARNING: empty slit"
-                signalList.append(np.zeros(data.shape[1]))
-                skyList.append(np.zeros(data.shape[1]))
+            if foundExtension == True:
+                
+                header=img[extension].header
+                
+                # Extract calibrated wavelength scale, assuming left most pixel corresponds to CRVAL1
+                w=np.arange(data.shape[1])*header['CDELT1']+header['CRVAL1']
+                if w[0] != header['CRVAL1']:
+                    raise Exception, "wavelength of pixel 0 doesn't correspond to CRVAL1 - what happened?"
+                wavelengthsList.append(w)
+                
+                # Extract signal, sky and CR-flagged 2d spectrum data
+                # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
+                if np.nonzero(data)[0].shape[0] > 0:
+                    signal, sky, mData=weightedExtraction(data)
+                    signalList.append(signal)
+                    skyList.append(sky)
+                    headersList.append(header)
+                    CRMaskedDataCube.append(mData)
+                else:
+                    print "WARNING: empty slit"
+                    signalList.append(np.zeros(data.shape[1]))
+                    skyList.append(np.zeros(data.shape[1]))
         
         # Make stacked spectrum - interpolate onto common wavelength scale, then take median
         # We could make this fancier (noise weighting etc.)...
@@ -1289,53 +1305,53 @@ def extractAndStackSpectra(maskDict, outDir):
         outFileName=onedspecDir+os.path.sep+maskDict['maskName']+"_"+maskDict['objectName'].replace(" ", "_")+"_"+extension+".fits"
         HDUList.writeto(outFileName, clobber=True)
 
-        # Alternative extraction method
+        # Alternative extraction method ---
         # NOTE: less effective than above ^^^
         #if extension == 'SLIT9': # for P001788N07
 
         # NOTE: These all have different wavelength calibrations stored in wavelengthsList
         # So project onto common wavelength scale (having corrected CRs with median sky)
-        CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
-        projDataCube=[]
-        refWavelengths=None
-        refHeader=None
-        for data, wavelengths, header in zip(CRMaskedDataCube, wavelengthsList, headersList):
-            if refWavelengths == None:
-                refWavelengths=w
-                refHeader=header
-            if projDataCube == []:
-                projDataCube.append(data)
-            else:
-                projData=np.zeros(projDataCube[0].shape)
-                for i in range(min([projData.shape[0], data.shape[0]])):
-                    tck=interpolate.splrep(w, data.data[i])
-                    projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
-                projDataCube.append(projData)
-        projDataCube=np.array(projDataCube)
+        #CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
+        #projDataCube=[]
+        #refWavelengths=None
+        #refHeader=None
+        #for data, wavelengths, header in zip(CRMaskedDataCube, wavelengthsList, headersList):
+            #if refWavelengths == None:
+                #refWavelengths=w
+                #refHeader=header
+            #if projDataCube == []:
+                #projDataCube.append(data)
+            #else:
+                #projData=np.zeros(projDataCube[0].shape)
+                #for i in range(min([projData.shape[0], data.shape[0]])):
+                    #tck=interpolate.splrep(w, data.data[i])
+                    #projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
+                #projDataCube.append(projData)
+        #projDataCube=np.array(projDataCube)
         
-        # Unravel the dataCube so we can try PCA or something
-        # This is a great way to see shifts in wavelength calib across the stack
-        reshaped=np.reshape(projDataCube, [projDataCube.shape[0]*projDataCube.shape[1], projDataCube.shape[2]])
+        ## Unravel the dataCube so we can try PCA or something
+        ## This is a great way to see shifts in wavelength calib across the stack
+        #reshaped=np.reshape(projDataCube, [projDataCube.shape[0]*projDataCube.shape[1], projDataCube.shape[2]])
         
-        # This really doesn't work
+        ## This really doesn't work
         #from sklearn import decomposition            
-        #pca=decomposition.PCA(n_components = 3)
-        #pca.fit(reshaped)
-        #plt.plot(refWavelengths, ndimage.uniform_filter1d(pca.components_[0], 15))
+        #pca=decomposition.FastICA(n_components = 3)
+        #a=pca.fit_transform(mData.transpose()).transpose()
+        #plt.plot(wavelengths, ndimage.uniform_filter1d(a[0], 15)
 
-        # Just stack and then extract like we were before...
-        med=np.median(projDataCube, axis = 0)            
-        signal, sky, mData=weightedExtraction(med)
+        ## Just stack and then extract like we were before...
+        #med=np.median(projDataCube, axis = 0)            
+        #signal, sky, mData=weightedExtraction(med)
         
-        # Output as .fits tables, one per slit
-        specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
-        skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
-        lambdaColumn=pyfits.Column(name='LAMBDA', format='D', array=refWavelengths)
-        tabHDU=pyfits.new_table([specColumn, skyColumn, lambdaColumn])
-        tabHDU.name='1D_SPECTRUM'
-        HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
-        outFileName=onedspecDir+os.path.sep+maskDict['maskName']+"_"+maskDict['objectName'].replace(" ", "_")+"_"+extension+"_altExtract.fits"
-        HDUList.writeto(outFileName, clobber=True)
+        ## Output as .fits tables, one per slit
+        #specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
+        #skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
+        #lambdaColumn=pyfits.Column(name='LAMBDA', format='D', array=refWavelengths)
+        #tabHDU=pyfits.new_table([specColumn, skyColumn, lambdaColumn])
+        #tabHDU.name='1D_SPECTRUM'
+        #HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
+        #outFileName=onedspecDir+os.path.sep+maskDict['maskName']+"_"+maskDict['objectName'].replace(" ", "_")+"_"+extension+"_altExtract.fits"
+        #HDUList.writeto(outFileName, clobber=True)
             
         #---
             
