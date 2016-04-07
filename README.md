@@ -9,6 +9,7 @@ the following grating/lamp/detector binning combinations:
 * pg0900 Ne (2x2 binning)
 * pg0900 Xe (2x2 binning)
 * pg1300 Ar (2x2 binning)
+* pg1300 CuAr (2x2 binning)
 * pg1800 Ne (2x2 binning)
 
 More can be added relatively easily (see the modelArcSpectra dir), but no documentation on 
