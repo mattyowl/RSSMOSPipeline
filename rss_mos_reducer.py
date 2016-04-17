@@ -717,7 +717,7 @@ def selectBestRefModel(modelFileNameList, arcData, thresholdSigma = 2.0):
     for modelFileName in modelFileNameList:
     
         # Load reference model
-        pickleFile=file(modelFileName, "r")
+        pickleFile=file(modelFileName, "rb")
         unpickler=pickle.Unpickler(pickleFile)
         refModelDict=unpickler.load()
         refModelDictsList.append(refModelDict)

@@ -115,7 +115,7 @@ def makeModelArcSpectrum(data, approxCoordsDict, outFileName, yRow, sigmaCut = 3
     
     # Save reference model as a pickled dictionary
     refModelDict={'featureTable': featureTable, 'arc_centreRow': data_centreRow}
-    pickleFile=file(outFileName, "w")
+    pickleFile=file(outFileName, "wb")
     pickler=pickle.Pickler(pickleFile)
     pickler.dump(refModelDict)
     pickleFile.close()
@@ -134,7 +134,7 @@ def findWavelengthCalibration(arcFileName, modelFileName, sigmaCut = 3.0, thresh
     """
     
     # Load reference model
-    pickleFile=file(modelFileName, "r")
+    pickleFile=file(modelFileName, "rb")
     unpickler=pickle.Unpickler(pickleFile)
     refModelDict=unpickler.load()
     pickleFile.close()
