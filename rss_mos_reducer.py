@@ -118,7 +118,7 @@ def getImageInfo(rawDir):
     for f in files:
         img=pyfits.open(f)
         header=img[0].header
-        if header['OBSMODE'] == 'SPECTROSCOPY' and header['MASKTYP'] == 'MOS':
+        if header['OBSMODE'] == 'SPECTROSCOPY':# and header['MASKTYP'] == 'MOS':
  
             dateObs=header['DATE-OBS']
             timeObs=header['TIME-OBS']
@@ -136,10 +136,26 @@ def getImageInfo(rawDir):
                 infoDict[maskID][obsType]=[]
             infoDict[maskID][obsType].append(f)
             
+            # MOS style
             if obsType == 'OBJECT':
                 infoDict[maskID]['objectName']=header['OBJECT'] # This can be 'flat' so is less useful than MASKID
                 infoDict[maskID]['maskName']=maskID             # Clunky, but convenient
-                
+                infoDict[maskID]['maskType']=header['MASKTYP']
+            
+            # Longslit style
+            #if obsType not in infoDict[maskID].keys():
+                #if obsType == 'OBJECT':
+                    #infoDict[maskID][obsType]={}
+                    #infoDict[maskID]['maskType']=header['MASKTYP']
+                #else:
+                    #infoDict[maskID][obsType]=[]
+            #if obsType != 'OBJECT':
+                #infoDict[maskID][obsType].append(f)
+            #else:
+                #if header['OBJECT'] not in infoDict[maskID][obsType].keys():
+                    #infoDict[maskID][obsType][header['OBJECT']]=[]
+                #infoDict[maskID][obsType][header['OBJECT']].append(f)
+            
     return infoDict
 
 #-------------------------------------------------------------------------------------------------------------
@@ -274,6 +290,19 @@ def cutIntoSlitLets(maskDict, outDir):
             outFile.write("box(%.1f,%.1f,%.1f,%.1f)\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0+1, centreColumn*2.0, (slitsDict[key]['yMax']-slitsDict[key]['yMin'])))
         outFile.close() 
 
+#-------------------------------------------------------------------------------------------------------------
+def cutIntoPseudoSlitLets(maskDict, outDir):
+    """For longslit data. Finds objects, and then cuts into pseudo-slitlets: we take some region +/- Y pixels
+    around the object trace and pretend that is a MOS slitlet. Outputs MEF files.
+        
+    NOTE: assuming slits_0.txt file applies across all images for now.
+    
+    """
+    
+    print "add code for finding object traces in long slit, making slitsDict, and making MEF files"
+    IPython.embed()
+    sys.exit()
+    
 #-------------------------------------------------------------------------------------------------------------
 def cutSlits(inFileName, outFileName, slitsDict):
     """Makes a MEF file containing slitlets.
@@ -1398,7 +1427,10 @@ else:
         
         makeMasterFlats(maskDict, outDir)
 
-        cutIntoSlitLets(maskDict, outDir)
+        if maskDict['maskType'] == 'MOS':
+            cutIntoSlitLets(maskDict, outDir)
+        elif maskDict['maskType'] == 'LONGSLIT':
+            cutIntoPseudoSlitLets(maskDict, outDir)
         
         applyFlatField(maskDict, outDir)
         
