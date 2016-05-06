@@ -102,7 +102,7 @@ def splitMEF(MEFFileName, rootOutFileName):
             newImg.append(hdu)
             newImg.writeto(rootOutFileName.replace(".fits", "_%d.fits" % (i)), clobber = True)    
 
-#------------------------------------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------------------------------------
 def getImageInfo(rawDir):
     """Sorts through all .fits files, making lists of biases, flats, science frames, arc frames, for each 
     night of observations, grating, position combo. Returns a dictionary of lists.
@@ -111,51 +111,50 @@ def getImageInfo(rawDir):
     
     """
  
-    # Based on the Gemini pipeline
-    # Here, organised by maskID -> filetype (we have flats/arcs for every occurance)
+    # Now organised by objectName and meta info -> flats, arcs, object frames
+    # This is so we can use one pipeline for MOS and longslit
     infoDict={}
     files=glob.glob(rawDir+os.path.sep+"mbxgp*.fits")  # Files either GMOS N or S depending on mask name
+    
+    # First, get object names
     for f in files:
         img=pyfits.open(f)
         header=img[0].header
-        if header['OBSMODE'] == 'SPECTROSCOPY':# and header['MASKTYP'] == 'MOS':
- 
-            dateObs=header['DATE-OBS']
-            timeObs=header['TIME-OBS']
-            maskID=header['MASKID']
-            if maskID not in infoDict.keys():
-                infoDict[maskID]={}  
-            #if dateObs not in infoDict[maskID].keys():
-                #infoDict[maskID][dateObs]={}
-                    
+        if header['OBSMODE'] == 'SPECTROSCOPY':
             obsType=header['CCDTYPE']
-            #if obsType not in infoDict[maskID][dateObs].keys():
-                #infoDict[maskID][dateObs][obsType]=[]
-            #infoDict[maskID][dateObs][obsType].append(f)
-            if obsType not in infoDict[maskID].keys():
-                infoDict[maskID][obsType]=[]
-            infoDict[maskID][obsType].append(f)
-            
-            # MOS style
+            maskID=header['MASKID']
             if obsType == 'OBJECT':
-                infoDict[maskID]['objectName']=header['OBJECT'] # This can be 'flat' so is less useful than MASKID
-                infoDict[maskID]['maskName']=maskID             # Clunky, but convenient
-                infoDict[maskID]['maskType']=header['MASKTYP']
-            
-            # Longslit style
-            #if obsType not in infoDict[maskID].keys():
-                #if obsType == 'OBJECT':
-                    #infoDict[maskID][obsType]={}
-                    #infoDict[maskID]['maskType']=header['MASKTYP']
-                #else:
-                    #infoDict[maskID][obsType]=[]
-            #if obsType != 'OBJECT':
-                #infoDict[maskID][obsType].append(f)
-            #else:
-                #if header['OBJECT'] not in infoDict[maskID][obsType].keys():
-                    #infoDict[maskID][obsType][header['OBJECT']]=[]
-                #infoDict[maskID][obsType][header['OBJECT']].append(f)
-            
+                maskName=header['OBJECT']+"_"+maskID
+                infoDict[maskName]={}
+                infoDict[maskName][maskID]={}
+                infoDict[maskName]['maskID']=maskID             # Clunky, but convenient
+                infoDict[maskName]['maskType']=header['MASKTYP']  
+                infoDict[maskName]['objName']=header['OBJECT']            
+
+    # Now add flats etc.
+    for maskName in infoDict.keys():
+        
+        for f in files:
+            img=pyfits.open(f)
+            header=img[0].header
+            if header['OBSMODE'] == 'SPECTROSCOPY':# and header['MASKTYP'] == 'MOS':
+    
+                dateObs=header['DATE-OBS']
+                timeObs=header['TIME-OBS']
+                maskID=header['MASKID']
+                obsType=header['CCDTYPE']
+
+                if maskID == infoDict[maskName]['maskID']:
+                    
+                    # NOTE: we could add some checks for e.g. grating, camera station etc. here
+                    # i.e., match flats, arcs to object frames here
+                    if obsType not in infoDict[maskName][maskID].keys():
+                        infoDict[maskName][maskID][obsType]=[]
+                    if obsType != 'OBJECT':
+                        infoDict[maskName][maskID][obsType].append(f)
+                    elif obsType == 'OBJECT' and header['OBJECT'] == infoDict[maskName]['objName']:
+                        infoDict[maskName][maskID][obsType].append(f)
+
     return infoDict
 
 #-------------------------------------------------------------------------------------------------------------
@@ -260,27 +259,35 @@ def cutIntoSlitLets(maskDict, outDir):
         maskDict['slitsDicts'][masterFlatPath]=slitsDict
         outFileName=makeOutputFileName(masterFlatPath, "c", outDir)
         cutSlits(masterFlatPath, outFileName, slitsDict)
-
-    toCutList=maskDict['OBJECT']+maskDict['ARC']
+    
+    # Cut arcs, flats, matched here with appropriate object frames
+    toCutList=maskDict['OBJECT']#+maskDict['ARC']
     outCutList=makeOutputFileNameList(toCutList, "c", outDir)
     print ">>> It is a good idea to check that for the below the corresponding DS9 .reg file aligns with the slits and that object spectra are actually centred in the slits..."
+    maskDict['cutFlatDict']={}
+    maskDict['cutArcDict']={}
     for f, outFileName in zip(toCutList, outCutList):
-        masterFlatPath=findMatchingFileByTime(f, maskDict['masterFlats'])
-        slitsDict=maskDict['slitsDicts'][masterFlatPath]
-        print "... cutting %s using %s for slit definition ..." % (f, masterFlatPath)
+        flatFileName=findMatchingFileByTime(f, maskDict['masterFlats'])
+        slitsDict=maskDict['slitsDicts'][flatFileName]
+        print "... cutting %s (and arcs, flats) using %s for slit definition ..." % (f, flatFileName)
+        label=os.path.split(flatFileName)[-1].replace(".fits", "")
+        # Object
         cutSlits(f, outFileName, slitsDict)
-        # Cut master flat too - for doing the actual flat fielding later...
-        cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cut_masterFlat")
-        if os.path.exists(cutMasterFlatPath) == False:
-            cutSlits(masterFlatPath, cutMasterFlatPath, slitsDict)
+        # Arc
+        arcFileName=findMatchingFileByTime(f, maskDict['ARC'])
+        cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
+        cutSlits(arcFileName, cutArcFileName, slitsDict)
+        maskDict['cutArcDict'][f]=cutArcFileName
+        # Flat
+        cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
+        cutSlits(flatFileName, cutFlatFileName, slitsDict)
+        maskDict['cutFlatDict'][f]=cutFlatFileName
     
-    # Write out a .reg file so we can match slits to objects
-    img=pyfits.open(f)
-    centreColumn=img['SCI'].header['NAXIS1']/2
-    img.close()
-    for masterFlatPath in maskDict['slitsDicts'].keys():
-        slitsDict=maskDict['slitsDicts'][masterFlatPath]
-        regFileName=outDir+os.path.sep+os.path.split(masterFlatPath)[-1].replace(".fits", "_slitLocations.reg")
+        # Write out a .reg file so we can match slits to objects
+        img=pyfits.open(f)
+        centreColumn=img['SCI'].header['NAXIS1']/2
+        img.close()
+        regFileName=outFileName.replace(".fits", "_slitLocations.reg")
         outFile=file(regFileName, "w")
         outFile.write("# DS9 region file\n")
         outFile.write('global color=green dashlist=8 3 width=1 font="helvetica 10 normal" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n')
@@ -289,7 +296,7 @@ def cutIntoSlitLets(maskDict, outDir):
             outFile.write("point(%.3f,%.3f) # point=boxcircle text={SLIT%d}\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0, key))            
             outFile.write("box(%.1f,%.1f,%.1f,%.1f)\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0+1, centreColumn*2.0, (slitsDict[key]['yMax']-slitsDict[key]['yMin'])))
         outFile.close() 
-
+        
 #-------------------------------------------------------------------------------------------------------------
 def cutIntoPseudoSlitLets(maskDict, outDir):
     """For longslit data. Finds objects, and then cuts into pseudo-slitlets: we take some region +/- Y pixels
@@ -298,11 +305,85 @@ def cutIntoPseudoSlitLets(maskDict, outDir):
     NOTE: assuming slits_0.txt file applies across all images for now.
     
     """
+        
+    # Find object traces in OBJECT frames and cut +/- some distance in Y around them
+    maskDict['slitsDicts']={}
+    for i in range(len(maskDict['OBJECT'])):
+        objPath=maskDict['OBJECT'][i]
+        slitsDict=findPseudoSlits(objPath)
+        maskDict['slitsDicts'][objPath]=slitsDict
     
-    print "add code for finding object traces in long slit, making slitsDict, and making MEF files"
-    IPython.embed()
-    sys.exit()
+    # There can be significant offsets between object traces in longslit frames
+    # So... compare all the pseudo-slits we assigned and measure a y-offset from the i=0 dict
+    # This will be used by cutSlits, if present
+    refDict=maskDict['slitsDicts'][maskDict['OBJECT'][0]]
+    img=pyfits.open(maskDict['OBJECT'][0])
+    height=img[1].data.shape[0]
+    ref=np.zeros(height)
+    for key in refDict.keys():
+        ref[refDict[key]['yCentre']]=1
+    shiftsDict={}
+    for key in maskDict['slitsDicts'].keys():
+        if key != maskDict['OBJECT'][0]:
+            slitsDict=maskDict['slitsDicts'][key]
+            g=np.zeros(height)
+            for skey in slitsDict.keys():
+                g[slitsDict[skey]['yCentre']]=1
+            corr, corrMax, shift=fftCorrelate(ref, g)
+            shiftsDict[key]=shift
+        else:
+            shiftsDict[key]=0.
     
+    # Remake all pseudo-slits dictionaries, based on reference minus shift
+    newSlitsDicts={}
+    for i in range(len(maskDict['OBJECT'])):
+        objPath=maskDict['OBJECT'][i]
+        newSlitsDicts[objPath]={}
+        for key in refDict:
+            newSlitsDicts[objPath][key]={}
+            newSlitsDicts[objPath][key]['yMin']=refDict[key]['yMin']-int(round(shiftsDict[objPath]))
+            newSlitsDicts[objPath][key]['yMax']=refDict[key]['yMax']-int(round(shiftsDict[objPath]))
+    maskDict['slitsDicts']=newSlitsDicts
+    
+    # ^^^ Tidy all the above up later
+    
+    # Cut arcs, flats, matched here with appropriate object frames
+    toCutList=maskDict['OBJECT']#+maskDict['ARC']
+    outCutList=makeOutputFileNameList(toCutList, "c", outDir)
+    print ">>> It is a good idea to check from the corresponding DS9 .reg file that object spectra are actually centred in the pseudo-slits..."
+    maskDict['cutFlatDict']={}
+    maskDict['cutArcDict']={}
+    for f, outFileName in zip(toCutList, outCutList):
+        print "... cutting %s (and arcs, flats) using %s for slit definition ..." % (f, f)
+        slitsDict=maskDict['slitsDicts'][f]
+        label=os.path.split(f)[-1].replace(".fits", "")
+        # Object
+        cutSlits(f, outFileName, slitsDict)
+        # Arc
+        arcFileName=findMatchingFileByTime(f, maskDict['ARC'])
+        cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
+        cutSlits(arcFileName, cutArcFileName, slitsDict)
+        maskDict['cutArcDict'][f]=cutArcFileName
+        # Flat
+        flatFileName=findMatchingFileByTime(f, maskDict['masterFlats'])
+        cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
+        cutSlits(flatFileName, cutFlatFileName, slitsDict)
+        maskDict['cutFlatDict'][f]=cutFlatFileName
+    
+        # Write out a .reg file so we can match slits to objects
+        img=pyfits.open(f)
+        centreColumn=img['SCI'].header['NAXIS1']/2
+        img.close()
+        regFileName=outFileName.replace(".fits", "_slitLocations.reg")
+        outFile=file(regFileName, "w")
+        outFile.write("# DS9 region file\n")
+        outFile.write('global color=green dashlist=8 3 width=1 font="helvetica 10 normal" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n')
+        outFile.write("image\n")
+        for key in slitsDict.keys():
+            outFile.write("point(%.3f,%.3f) # point=boxcircle text={SLIT%d}\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0, key))            
+            outFile.write("box(%.1f,%.1f,%.1f,%.1f)\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0+1, centreColumn*2.0, (slitsDict[key]['yMax']-slitsDict[key]['yMin'])))
+        outFile.close() 
+        
 #-------------------------------------------------------------------------------------------------------------
 def cutSlits(inFileName, outFileName, slitsDict):
     """Makes a MEF file containing slitlets.
@@ -446,6 +527,74 @@ def findSlits(flatFileName, minSlitHeight = 10):
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------
+def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5):
+    """Finds object traces in longslit data, defines regions +/- skyRows around them, so we can treat in 
+    the same way as MOS slitlets.
+    
+    objects are detected as peaks in the SNR profile across the slit. Use minTraceWidth to set the number
+    of pixels in the SNR profile that must be above thresholdSigma for an object to be detected.
+    
+    Returns a dictionary which can be fed into cutSlits
+    
+    """ 
+    
+    img=pyfits.open(objFileName)
+    d=img['SCI'].data
+    
+    # Take out spectrum of flat lamp (approx)
+    a=np.median(d, axis = 0)
+    d=d/a
+    d[np.isnan(d)]=0.0
+        
+    # Find local background, noise (running clipped mean)
+    prof=np.median(d, axis = 1)    
+    prof[np.less(prof, 0)]=0.
+    halfBlkSize=50
+    sigmaCut=3.0        
+    bck=np.zeros(prof.shape)
+    sig=np.zeros(prof.shape)
+    for y in range(prof.shape[0]):
+        yMin=y-halfBlkSize
+        yMax=y+halfBlkSize
+        if yMin < 0:
+            yMin=0
+        if yMax > prof.shape[0]-1:
+            yMax=prof.shape[0]-1
+        mean=0
+        sigma=1e6
+        for i in range(20):
+            nonZeroMask=np.not_equal(prof[yMin:yMax], 0)
+            mask=np.less(abs(prof[yMin:yMax]-mean), sigmaCut*sigma)
+            mean=np.mean(prof[yMin:yMax][mask])
+            sigma=np.std(prof[yMin:yMax][mask])            
+        bck[y]=mean
+        sig[y]=sigma
+    
+    # Detect peaks
+    profSNR=(prof-bck)/sig    
+    mask=np.greater(profSNR, thresholdSigma)    
+    segmentationMap, numObjects=ndimage.label(mask)
+    sigPixMask=np.equal(mask, 1)
+    objIDs=np.unique(segmentationMap)
+    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+    objPositions=ndimage.center_of_mass(prof, labels = segmentationMap, index = objIDs)
+    objPositions=np.array(objPositions).flatten()
+    minPixMask=np.greater(objNumPix, minTraceWidth)
+    
+    # Define pseudo slits, including sky rows next to each object
+    # We need yCentre here for using cross correlation to get the shift between images
+    slitsDict={}
+    slitCount=0
+    for objID, yPos, traceWidth in zip(objIDs[minPixMask], objPositions[minPixMask], objNumPix[minPixMask]):
+        yMin=int(round(yPos-(traceWidth/2.+skyRows)))
+        yMax=int(round(yPos+(traceWidth/2.+skyRows)))
+        if (yMax - yMin) > minSlitHeight:
+            slitCount=slitCount+1
+            slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax, 'yCentre': yPos}    
+            
+    return slitsDict
+
+#-------------------------------------------------------------------------------------------------------------
 def applyFlatField(maskDict, outDir):
     """Applies the flat field correction. Let's do this in place...
     
@@ -454,12 +603,10 @@ def applyFlatField(maskDict, outDir):
     print ">>> Applying flat field..."
     
     toFlatList=makeOutputFileNameList(maskDict['OBJECT'], "c", outDir)
-    for f in toFlatList:
-        masterFlatPath=findMatchingFileByTime(f, maskDict['masterFlats'])
-        cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cut_masterFlat")
+    for rawFileName, f in zip(maskDict['OBJECT'], toFlatList):
+        cutMasterFlatPath=maskDict['cutFlatDict'][rawFileName]
         img=pyfits.open(f)
         flatImg=pyfits.open(cutMasterFlatPath)
-            
         extensionsList=[]
         for hdu in img:
             if "SLIT" in hdu.name:
@@ -696,10 +843,11 @@ def minFunc_findScale(s, shift, arcRow, normRefModel, data_x):
     arcMean=np.mean(arcRow_scaled)
     arcStd=np.std(arcRow_scaled)
     
+
     # Old style: minimize what we call overlap below - this behaves well with optimize.minimize
     # (overlap vs scale is a function with a clear minimum)
     overlap=np.trapz(abs(normRefModel[:data_x.shape[0]]-(arcRow_scaled-arcMean)/arcStd))
-
+        
     return overlap
 
 #-------------------------------------------------------------------------------------------------------------
@@ -707,9 +855,14 @@ def findScaleAndShift(arcRow, refModelDict):
     """Find best fit stretch and scale to transform arcRow to reference model
     
     """
-    
+        
     # Use cross correlation to get initial guess at shift between arc and model
     shift=np.argmax(np.correlate(refModelDict['arc_centreRow'], arcRow, mode = 'full'))-refModelDict['arc_centreRow'].shape[0]
+    
+    # Sometimes the refModel is shorter by a pixel than arcRow (we can handle the reverse case)
+    # NOTE: added when adapting MOS pipeline to work on longslit
+    if arcRow.shape[0] > refModelDict['arc_centreRow'].shape[0]:
+        arcRow=arcRow[:refModelDict['arc_centreRow'].shape[0]]
     
     # New optimize based method (robust when used with overlap method, but not with xcorr)
     data_x=np.arange(0, arcRow.shape[0])        
@@ -1000,10 +1153,12 @@ def wavelengthCalibration2d(maskDict, outDir):
         
     print ">>> Finding 2d wavelength solution ..."
     maskDict['wavelengthCalib']={}
-    for arcFileName in maskDict['ARC']:
-        print "--> arc = %s ..." % (arcFileName)
-       
-        cutArcPath=makeOutputFileName(arcFileName, "c", outDir)                
+    for key in maskDict['cutArcDict'].keys():
+        
+        cutArcPath=maskDict['cutArcDict'][key]
+        
+        print "--> arc = %s ..." % (cutArcPath)
+              
         img=pyfits.open(cutArcPath)
         
         extensionsList=[]
@@ -1016,7 +1171,7 @@ def wavelengthCalibration2d(maskDict, outDir):
         lampid=img[0].header['LAMPID']
         modelFileName=REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle"
 
-        maskDict['wavelengthCalib'][arcFileName]={}
+        maskDict['wavelengthCalib'][cutArcPath]={}
         for extension in extensionsList:
             print "... extension = %s ..." % (extension)
             arcData=img[extension].data
@@ -1025,21 +1180,21 @@ def wavelengthCalibration2d(maskDict, outDir):
                 print "Use createModelArcSpectrum.py script under modelArcSpectra dir"
                 print "(arcFileName: %s)" % (arcFileName)
                 sys.exit()
-            maskDict['wavelengthCalib'][arcFileName][extension]=findWavelengthCalibration(arcData, modelFileName, diagnosticsDir = diagnosticsDir, diagnosticsLabel = extension)
+            maskDict['wavelengthCalib'][cutArcPath][extension]=findWavelengthCalibration(arcData, modelFileName, diagnosticsDir = diagnosticsDir, diagnosticsLabel = extension)
     
     # Apply the calibration to the arc frames (diagnostic purposes)
     # 'rw' prefix => rectified and wavelength calibrated
-    for arcFileName in maskDict['ARC']:
-        cutArcPath=makeOutputFileName(arcFileName, "c", outDir)                
-        rectArcPath=makeOutputFileName(arcFileName, "rwc", outDir)
-        wavelengthCalibrateAndRectify(cutArcPath, rectArcPath, maskDict['wavelengthCalib'][arcFileName], makeDiagnosticPlots = True)
+    for key in maskDict['cutArcDict'].keys():
+        cutArcPath=maskDict['cutArcDict'][key]                
+        rectArcPath=makeOutputFileName(cutArcPath, "rw", outDir)
+        wavelengthCalibrateAndRectify(cutArcPath, rectArcPath, maskDict['wavelengthCalib'][cutArcPath], makeDiagnosticPlots = True)
     
     # Apply the calibration to object spectra           
     for fileName in maskDict['OBJECT']:
-        arcFileName=findMatchingFileByTime(fileName, maskDict['ARC'])
+        cutArcPath=maskDict['cutArcDict'][fileName]                
         cutPath=makeOutputFileName(fileName, "c", outDir)
         rectPath=makeOutputFileName(fileName, "rwc", outDir)
-        wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][arcFileName])        
+        wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][cutArcPath])        
 
 #-------------------------------------------------------------------------------------------------------------
 def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0):
@@ -1254,8 +1409,7 @@ def extractAndStackSpectra(maskDict, outDir):
         os.makedirs(onedspecDir)
     
     # Get list of extensions
-    arcFileName=maskDict['ARC'][0]    
-    cutArcPath=makeOutputFileName(arcFileName, "rwc", outDir)
+    cutArcPath=maskDict['cutArcDict'][maskDict['OBJECT'][0]]                
     img=pyfits.open(cutArcPath)
     extensionsList=[]
     for hdu in img:
@@ -1331,7 +1485,7 @@ def extractAndStackSpectra(maskDict, outDir):
         tabHDU=pyfits.new_table([specColumn, skyColumn, lambdaColumn])
         tabHDU.name='1D_SPECTRUM'
         HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
-        outFileName=onedspecDir+os.path.sep+maskDict['maskName']+"_"+maskDict['objectName'].replace(" ", "_")+"_"+extension+".fits"
+        outFileName=onedspecDir+os.path.sep+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         HDUList.writeto(outFileName, clobber=True)
 
         # Alternative extraction method ---
@@ -1389,14 +1543,15 @@ def extractAndStackSpectra(maskDict, outDir):
 # Main
 if len(sys.argv) < 4:
     print "Run: % rss_mos_reducer.py rawDir reducedDir maskName"
-    print "Use maskName = 'all' to reduce all masks found under rawDir/"
-    print "    maskName = 'list' to list all masks found under rawDir/"
+    print "Use maskName = 'all' to reduce all data found under rawDir/"
+    print "    maskName = 'list' to list all masks (by object) found under rawDir/"
+    print "maskName is made from the combination OBJECT_MASKID in the .fits header"
 else:
 
     # There will be a UI ultimately
     rawDir=sys.argv[1]
     baseOutDir=sys.argv[2]
-    maskID=sys.argv[3]
+    maskName=sys.argv[3]
     
     if os.path.exists(baseOutDir) == False:
         os.makedirs(baseOutDir)
@@ -1404,32 +1559,40 @@ else:
     # Sort out what's what...
     infoDict=getImageInfo(rawDir)
     
-    if maskID == 'list':
+    if maskName == 'list':
         print "Masks found: %s" % (str(infoDict.keys()))
         sys.exit()
-    elif maskID != 'all':
+    elif maskName != 'all':
         shortDict={}
         for key in infoDict.keys():
-            if key == maskID:
+            if key == maskName:
                 shortDict[key]=infoDict[key]
         infoDict=shortDict
     
-    # We're organised by the mask, reduce each in turn
-    for maskID in infoDict.keys():  # try more complicated case first
+    if maskName != 'all' and maskName not in infoDict.keys():
+        print "ERROR: maskName not found. Try using 'list' to see available maskNames."
+        sys.exit()
+    
+    # We're organised by object name, reduce each in turn
+    for maskName in infoDict.keys():  # try more complicated case first
         
-        print ">>> Mask: %s" % (maskID)
+        print ">>> Mask: %s" % (maskName)
         
-        outDir=baseOutDir+os.path.sep+maskID
+        outDir=baseOutDir+os.path.sep+maskName
         if os.path.exists(outDir) == False:
             os.makedirs(outDir)
-            
-        maskDict=infoDict[maskID]
+        
+        # Tied ourselves in knots a bit here...
+        maskDict=infoDict[maskName][infoDict[maskName]['maskID']]
+        maskDict['maskID']=infoDict[maskName]['maskID']
+        maskDict['objName']=infoDict[maskName]['objName']
+        maskType=infoDict[maskName]['maskType']
         
         makeMasterFlats(maskDict, outDir)
 
-        if maskDict['maskType'] == 'MOS':
+        if maskType == 'MOS':
             cutIntoSlitLets(maskDict, outDir)
-        elif maskDict['maskType'] == 'LONGSLIT':
+        elif maskType == 'LONGSLIT':
             cutIntoPseudoSlitLets(maskDict, outDir)
         
         applyFlatField(maskDict, outDir)

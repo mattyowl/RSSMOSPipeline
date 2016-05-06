@@ -1,5 +1,5 @@
 # RSSMOSPipeline
-Pipeline for reducing multi-object spectroscopy from the Robert Stobie Spectrograph on SALT.
+Pipeline for reducing both longslit (added May 2016) and multi-object spectroscopy from the Robert Stobie Spectrograph on SALT.
 
 ## Important notes
 For wavelength calibration, a reference model needs to be made. So far this has been done for
@@ -47,13 +47,13 @@ should contain the contents of the `product/` dir, as provided by SALT.
     python rss_mos_reducer.py rawData reducedData maskName
     ```
 
-    You can find maskName from the FITS headers for your data - look for the `MASKID` keyword.
+    maskName is the combination of OBJECT_MASKID from the corresponding FITS header keywords.
     
-    So, for example if your data were taken with a mask called P000807N01 and live in a directory
-    called `ACTTest` then you would run the pipeline with:
+    So, for example if your data for an object named J0058.1+0031 were taken with a mask called 
+    P001788N07 and live in a directory called `product` then you would run the pipeline with:
 
     ```
-    python rss_mos_reducer.py ACTTest reducedACTTest P000807N01
+    python rss_mos_reducer.py product reduced J0058.1+0031_P001788N07
     ```
     
     If you want to just list the masks found under a directory called `product` (without doing anything
@@ -74,12 +74,12 @@ should contain the contents of the `product/` dir, as provided by SALT.
     example.
 
 4.  After the pipeline has finished, you will find data at various stages of reduction under the
-`   reducedData` dir (`reducedACTTest` for the above example). At the moment, this is not cleaned up.
+`   reducedData` dir (`reduced` for the above example). At the moment, this is not cleaned up.
 
-    The extracted 1d spectra can be found under (for the example above) `reducedACTTest/P000807N01/1DSpec/`.
+    The extracted 1d spectra can be found under (for the example above) `reduced/J0058.1+0031_P001788N07/1DSpec`.
     They include the slit number in the file name (e.g., `*_SLIT10.fits`). You can check which slit
     (identified from the flat frame) corresponds with which extracted spectrum by examining the
-    `masterFlat_?.fits` file(s) and the corresponding DS9 region file(s) (ending .reg) in the `reducedData/`
+    `masterFlat_?.fits` file(s) and the corresponding DS9 region file(s) (ending .reg) in the `reduced/`
     directory.
 
     The 1d spectra are in FITS table format (stored in the extension `1D_SPECTRUM`) with the following 
@@ -88,6 +88,13 @@ should contain the contents of the `product/` dir, as provided by SALT.
     * `SPEC` 		- the object spectrum
     * `SKYSPEC` 	- the spectrum of the sky
     * `LAMBDA`	- the wavelength scale corresponding to both of the above (in Angstroms)
+
+## Longslit mode
+
+As of May 2016, the pipeline will run on longslit data. The code detects object traces in each science frame,
+and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
+for MOS data. This might need some tweaking to allow the user to set detection thresholds manually (in which
+case, command-line switches for this will be added).
 
 ## Things which can/should be improved/added
 * flat fielding (polynomial fit probably not optimal)
