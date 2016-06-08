@@ -129,7 +129,7 @@ def getImageInfo(rawDir):
                 infoDict[maskName][maskID]={}
                 infoDict[maskName]['maskID']=maskID             # Clunky, but convenient
                 infoDict[maskName]['maskType']=header['MASKTYP']  
-                infoDict[maskName]['objName']=header['OBJECT']  
+                infoDict[maskName]['objName']=header['OBJECT'].replace("'", "").replace('"', "")  
 
     # Now add flats etc.
     for maskName in infoDict.keys():
@@ -154,9 +154,9 @@ def getImageInfo(rawDir):
                         infoDict[maskName][maskID][obsType].append(f)
                     elif obsType == 'OBJECT' and header['OBJECT'] == infoDict[maskName]['objName']:
                         infoDict[maskName][maskID][obsType].append(f)
-                    # Just so we can track this later in output 1d spectra
-                    infoDict[maskName][maskID]['RA']=header['RA']
-                    infoDict[maskName][maskID]['DEC']=header['DEC']
+                        # Just so we can track this later in output 1d spectra
+                        infoDict[maskName][maskID]['RA']=header['RA']
+                        infoDict[maskName][maskID]['DEC']=header['DEC']
                     
     return infoDict
 
@@ -1330,6 +1330,7 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.8):
     prof=measureProfile(skySub) # not iterating this at the moment as can go in circles
     while diff > tolerance or k > maxIterations:
         xArr=[]
+        #prof=measureProfile(skySub)
         for i in range(data.shape[1]):
             b=skySub[:, i]
             A=np.zeros([b.shape[0]+2, b.shape[0]])
