@@ -143,6 +143,7 @@ def getImageInfo(rawDir):
                 timeObs=header['TIME-OBS']
                 maskID=header['MASKID']
                 obsType=header['CCDTYPE']
+                objName=header['OBJECT'].replace("'", "").replace('"', "")  
 
                 if maskID == infoDict[maskName]['maskID']:
                                     
@@ -152,7 +153,7 @@ def getImageInfo(rawDir):
                         infoDict[maskName][maskID][obsType]=[]
                     if obsType != 'OBJECT':
                         infoDict[maskName][maskID][obsType].append(f)
-                    elif obsType == 'OBJECT' and header['OBJECT'] == infoDict[maskName]['objName']:
+                    elif obsType == 'OBJECT' and objName == infoDict[maskName]['objName']:
                         infoDict[maskName][maskID][obsType].append(f)
                         # Just so we can track this later in output 1d spectra
                         infoDict[maskName][maskID]['RA']=header['RA']
