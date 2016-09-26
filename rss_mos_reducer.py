@@ -433,7 +433,7 @@ def findSlits(flatFileName, minSlitHeight = 10):
     prof=np.median(d, axis = 1)
     grad=np.gradient(prof)
 
-    threshold=0.1
+    threshold=0.4   # was 0.1
     featureMinPix=3
     plusMask=np.greater(grad, threshold)
     minusMask=np.less(grad, threshold*-1)
@@ -451,7 +451,7 @@ def findSlits(flatFileName, minSlitHeight = 10):
                 lookingFor=0
         if lookingFor == 0:
             if minusMask[i] == True:
-                yMax=i
+                yMax=i+2
                 lookingFor=1
         if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
             # Does this need deblending?
@@ -462,6 +462,11 @@ def findSlits(flatFileName, minSlitHeight = 10):
             slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax}    
             yMin=None
             yMax=None
+    
+    # Debugging
+    #print "Check slitsDict"
+    #IPython.embed()
+    #sys.exit()
     
     # Slits can be bendy: measure the bendiness 
     # above routine misses large chunks of red end of bendy slits at top of mask
@@ -1302,7 +1307,7 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.8):
     print "... extracting spectrum ..."
     
     # Throw away rows at edges as these often contain noise
-    throwAwayRows=3
+    throwAwayRows=4
     data=data[throwAwayRows:-throwAwayRows]
     
     # Find the chip gaps and make a mask
@@ -1319,7 +1324,7 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.8):
 
     # First measurement of the profile of the object
     prof=measureProfile(data)
-
+    
     # Iterative sky subtraction
     wn2d=np.zeros(data.shape)+chipGapMask               # Treat chip gaps as noise
     skySub=np.zeros(data.shape)+data
@@ -1604,6 +1609,9 @@ def extractAndStackSpectra(maskDict, outDir):
     for hdu in img:
         if "SLIT" in hdu.name:
             extensionsList.append(hdu.name)
+    
+    # Debugging...
+    #extensionsList=['SLIT9']
     
     # The way we stack... identify signal dominated rows and average them to a 1d spectrum, then stack all 1d
     # Do same for sky rows
