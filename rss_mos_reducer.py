@@ -1674,7 +1674,7 @@ def extractAndStackSpectra(maskDict, outDir):
             extensionsList.append(hdu.name)
     
     # Debugging...
-    extensionsList=['SLIT9']
+    #extensionsList=['SLIT9']
     
     # The way we stack... identify signal dominated rows and average them to a 1d spectrum, then stack all 1d
     # Do same for sky rows
@@ -1838,9 +1838,9 @@ else:
         elif maskType == 'LONGSLIT':
             cutIntoPseudoSlitLets(maskDict, outDir)
         
-        #applyFlatField(maskDict, outDir)
+        applyFlatField(maskDict, outDir)
         
-        #wavelengthCalibration2d(maskDict, outDir)
+        wavelengthCalibration2d(maskDict, outDir)
 
         extractAndStackSpectra(maskDict, outDir)
  
