@@ -1395,9 +1395,8 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4):
             try:
                 x, R=optimize.nnls(A.transpose(), b)
             except:
-                print "nnls failed - infs or nans?"
-                IPython.embed()
-                sys.exit()
+                # This column must be completely full of noise
+                x=np.zeros(data.shape[0]+2)
             xArr.append(x)
         
         # Below here as usual
