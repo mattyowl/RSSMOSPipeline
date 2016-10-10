@@ -13,6 +13,7 @@ import glob
 import time
 import datetime
 import atpy
+import argparse
 #from astLib import *
 from scipy import interpolate
 from scipy import ndimage
@@ -246,24 +247,33 @@ def groupFilesListByTime(filesList, deltaHours = 0.5):
     return outFileLists
     
 #-------------------------------------------------------------------------------------------------------------
-def cutIntoSlitLets(maskDict, outDir):
+def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
     """Cuts files into slitlets, making MEF files. 
         
     NOTE: assuming slits_0.txt file applies across all images for now.
+    
+    threshold is the parameter used by findSlits
     
     """
 
     # We find slits using master flats, and store slit locations in a dictionary indexed by masterFlatPath
     # We have a routine to pull out a corresponding master flat (and hence slitsDict) for every image.
     maskDict['slitsDicts']={}
+    numSlits=None
     for i in range(len(maskDict['masterFlats'])):
         masterFlatPath=maskDict['masterFlats'][i]
         cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
-        slitsDict=findSlits(masterFlatPath)
+        slitsDict=findSlits(masterFlatPath, threshold = threshold)
+        # Sanity check - do we find the same number of slits in all files?
+        if numSlits == None:
+            numSlits=len(slitsDict.keys())
+        else:
+            if numSlits != len(slitsDict.keys()):
+                raise Exception, "didn't find the same number of slits in all files - try using -t switch to adjust threshold"
         maskDict['slitsDicts'][masterFlatPath]=slitsDict
         outFileName=makeOutputFileName(masterFlatPath, "c", outDir)
         cutSlits(masterFlatPath, outFileName, slitsDict)
-    
+        
     # Cut arcs, flats, matched here with appropriate object frames
     toCutList=maskDict['OBJECT']#+maskDict['ARC']
     outCutList=makeOutputFileNameList(toCutList, "c", outDir)
@@ -412,10 +422,12 @@ def cutSlits(inFileName, outFileName, slitsDict):
     newImg.close()
     
 #-------------------------------------------------------------------------------------------------------------
-def findSlits(flatFileName, minSlitHeight = 10):
+def findSlits(flatFileName, minSlitHeight = 10, threshold = 0.1):
     """Find the slits, without using any info from the mask design file...
     
     minSlitHeight is used to throw out any problematic weird too-narrow slits (if any)
+    
+    threshold is used to identify slit edges. Values in the range 0.1 - 0.4 work best.
     
     Returns a dictionary which can be fed into cutSlits
     
@@ -433,7 +445,7 @@ def findSlits(flatFileName, minSlitHeight = 10):
     prof=np.median(d, axis = 1)
     grad=np.gradient(prof)
 
-    threshold=0.4   # was 0.1
+    #threshold=0.4   # was 0.1
     featureMinPix=3
     plusMask=np.greater(grad, threshold)
     minusMask=np.less(grad, threshold*-1)
@@ -454,10 +466,6 @@ def findSlits(flatFileName, minSlitHeight = 10):
                 yMax=i+2
                 lookingFor=1
         if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
-            # Does this need deblending?
-            #if yMin > 1360 and yMax < 1480:
-                #IPython.embed()
-                #sys.exit()
             slitCount=slitCount+1
             slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax}    
             yMin=None
@@ -1649,8 +1657,10 @@ def weightedExtraction_old(data, medColumns = 10, thresholdSigma = 30.0, sigmaCu
     return signal, sky, mData
 
 #-------------------------------------------------------------------------------------------------------------
-def extractAndStackSpectra(maskDict, outDir):
+def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
     """Extracts and stacks spectra from science frames which have already been wavelength calibrated.
+    
+    subFrac is the fraction of the sky to be subtracted in each iteration of weightedExtraction.
     
     Output is in .fits table format.
         
@@ -1705,7 +1715,9 @@ def extractAndStackSpectra(maskDict, outDir):
                 header=img[extension].header
                 
                 # Extract calibrated wavelength scale, assuming left most pixel corresponds to CRVAL1
+                # NOTE: if this fails due to missing CDELT1, it probably means the slit we found is a wacky shape - check the .reg file
                 w=np.arange(data.shape[1])*header['CDELT1']+header['CRVAL1']
+                    
                 if w[0] != header['CRVAL1']:
                     raise Exception, "wavelength of pixel 0 doesn't correspond to CRVAL1 - what happened?"
                 wavelengthsList.append(w)
@@ -1714,7 +1726,7 @@ def extractAndStackSpectra(maskDict, outDir):
                 # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
                 if np.nonzero(data)[0].shape[0] > 0:
                     
-                    signal, sky=weightedExtraction(data)
+                    signal, sky=weightedExtraction(data, subFrac = subFrac)
                     #signal, sky, mData=weightedExtraction_old(data)
                     #CRMaskedDataCube.append(mData)
                     signalList.append(signal)
@@ -1782,21 +1794,34 @@ def extractAndStackSpectra(maskDict, outDir):
         HDUList.writeto(outFileName, clobber=True)
    
 #-------------------------------------------------------------------------------------------------------------
-# Main
-if len(sys.argv) < 4:
-    print "Run: % rss_mos_reducer.py rawDir reducedDir maskName"
-    print "Use maskName = 'all' to reduce all data found under rawDir/"
-    print "    maskName = 'list' to list all masks (by object) found under rawDir/"
-    print "maskName is made from the combination OBJECT_MASKID in the .fits header"
-else:
+if __name__ == '__main__':
 
-    # There will be a UI ultimately
-    rawDir=sys.argv[1]
-    baseOutDir=sys.argv[2]
-    maskName=sys.argv[3]
+    parser = argparse.ArgumentParser("rss_mos_reducer.py")
+    parser.add_argument("rawDir", help="The directory that holds the partially-processed data. Usually called product.")
+    parser.add_argument("reducedDir", help="The directory where the reduced data will be written, along with any diagnostic data. This directory will be created if it doesn't already exist.")
+    parser.add_argument("maskName", help="Use 'all' to reduce all data found under rawDir/, or 'list' to list all masks (by object) found under rawDir/. The maskName is made from the keyword combination OBJECT_MASKID found in the .fits headers.") 
+    parser.add_argument("-t", "--threshold", dest="threshold", default=0.1, help="Threshold used for the slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline. Values in the range 0.1-0.4 work best (default=0.2; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
+    parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.4, help="Fraction of the sky background to be subtracted in each iteration of the spectral extraction algorithm (default=0.4; increase this value for faster convergence).")
+    parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
+
+    args = parser.parse_args()
+
+    rawDir=args.rawDir
+    baseOutDir=args.reducedDir
+    maskName=args.maskName
+    
+    threshold=float(args.threshold)
+    subFrac=float(args.subFrac)
+    excludeMasks=args.excludeMasks.split(",")
     
     if os.path.exists(baseOutDir) == False:
         os.makedirs(baseOutDir)
+    
+    # Log what options we're running with
+    logFile=file(baseOutDir+os.path.sep+"rss_mos_reducer.log", "w")
+    for key in args.__dict__.keys():
+        logFile.write("%s: %s\n" % (key, str(args.__dict__[key])))
+    logFile.close()
     
     # Sort out what's what...
     infoDict=getImageInfo(rawDir)
@@ -1810,13 +1835,18 @@ else:
             if key == maskName:
                 shortDict[key]=infoDict[key]
         infoDict=shortDict
-    
+        
     if maskName != 'all' and maskName not in infoDict.keys():
         print "ERROR: maskName not found. Try using 'list' to see available maskNames."
         sys.exit()
-    
+
+    masksToReduce=[]
+    for key in infoDict.keys():
+        if key not in excludeMasks:
+            masksToReduce.append(key)
+            
     # We're organised by object name, reduce each in turn
-    for maskName in infoDict.keys():  # try more complicated case first
+    for maskName in masksToReduce:
         
         print ">>> Mask: %s" % (maskName)
         
@@ -1833,7 +1863,7 @@ else:
         makeMasterFlats(maskDict, outDir)
 
         if maskType == 'MOS':
-            cutIntoSlitLets(maskDict, outDir)
+            cutIntoSlitLets(maskDict, outDir, threshold = threshold)
         elif maskType == 'LONGSLIT':
             cutIntoPseudoSlitLets(maskDict, outDir)
         
@@ -1841,7 +1871,7 @@ else:
         
         wavelengthCalibration2d(maskDict, outDir)
 
-        extractAndStackSpectra(maskDict, outDir)
+        extractAndStackSpectra(maskDict, outDir, subFrac = subFrac)
  
     
     
