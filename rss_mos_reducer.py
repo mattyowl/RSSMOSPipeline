@@ -1753,9 +1753,6 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
         write1DSpectrum(signal, sky, refWavelengths, outFileName)
         
         # Write 2d combined spectrum
-        print "Write 2d spectrum"
-        IPython.embed()
-        sys.exit()
         outFileName=specDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         newImg=pyfits.HDUList()
         hdu=pyfits.PrimaryHDU(None, refHeader)   
