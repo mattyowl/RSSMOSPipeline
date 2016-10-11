@@ -1485,7 +1485,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     """
 
     # Throw away rows at edges as these often contain noise
-    throwAwayRows=3
+    throwAwayRows=2
     data=data[throwAwayRows:-throwAwayRows]
     
     # Find the chip gaps and make a mask
@@ -1596,22 +1596,26 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     return signal, sky, mData
 
 #-------------------------------------------------------------------------------------------------------------
-def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
+def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 0.4):
     """Extracts and stacks spectra from science frames which have already been wavelength calibrated.
-    
-    subFrac is the fraction of the sky to be subtracted in each iteration of iterativeWeightedExtraction.
-    
+        
     Two methods are used for extracting spectra:
     
-    1.  Individual 1d spectra are extracted from each science frame (using iterativeWeightedExtraction)
-        and then stacked. This might be desirable if object traces shift from frame-to-frame (as was
-        the case with early MOS data). These are placed under outDir/1DSpec_iterative/
+    1.  Individual 1d spectra are extracted from each science frame and then stacked. This might be 
+        desirable if object traces shift from frame-to-frame. These are placed under 
+        outDir/1DSpec_extractAndStack/
         
-    2.  The 2d spectra are stacked and then a 1d spectrum is extracted.
-        These are placed under outDir/1DSpec_2DSpec/. The stacked 2d spectra are also placed in this
+    2.  The 2d spectra are stacked and then a 1d spectrum is extracted. These are placed under 
+        outDir/1DSpec_2DSpec_stackAndExtract/. The stacked 2d spectra are also placed in this
         directory.
         
     It seems like method (2) works best (Oct 2016).
+    
+    If iterativeMethod = True, then an iterative method for spectral extraction is used. In which
+    case _iterative is added to the name of the output directory.
+    
+    subFrac is the fraction of the sky to be subtracted in each iteration of iterativeWeightedExtraction,
+    if iterativeMethod = True.
         
     Cosmic rays are flagged in the first method, and masked out (replaced with sky) for the second method.
     In both cases, the median is used to stack the frames (or 1D spectra), and of course all data are
@@ -1626,14 +1630,18 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
     if os.path.exists(diagnosticsDir) == False:
         os.makedirs(diagnosticsDir)
      
-    iterativeSpecDir=outDir+os.path.sep+"1DSpec_iterative"
-    if os.path.exists(iterativeSpecDir) == False:
-        os.makedirs(iterativeSpecDir)
-    
-    specDir=outDir+os.path.sep+"1DSpec_2DSpec"
-    if os.path.exists(specDir) == False:
-        os.makedirs(specDir)
-            
+    extractStackSpecDir=outDir+os.path.sep+"1DSpec_extractAndStack"
+    if iterativeMethod == True:
+        extractStackSpecDir=extractStackSpecDir+"_iterative"
+    if os.path.exists(extractStackSpecDir) == False:
+        os.makedirs(extractStackSpecDir)
+        
+    stackExtractSpecDir=outDir+os.path.sep+"1DSpec_2DSpec_stackAndExtract"
+    if iterativeMethod == True:
+        stackExtractSpecDir=stackExtractSpecDir+"_iterative"
+    if os.path.exists(stackExtractSpecDir) == False:
+        os.makedirs(stackExtractSpecDir)    
+
     # Get list of extensions
     cutArcPath=maskDict['cutArcDict'][maskDict['OBJECT'][0]]                
     img=pyfits.open(cutArcPath)
@@ -1686,8 +1694,10 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
                 # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
                 if np.nonzero(data)[0].shape[0] > 0:
                     
-                    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac)
-                    #signal, sky, mData=weightedExtraction(data)
+                    if iterativeMethod == True:
+                        signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac)
+                    else:
+                        signal, sky, mData=weightedExtraction(data)
                     CRMaskedDataCube.append(mData)
                     signalList.append(signal)
                     skyList.append(sky)
@@ -1722,7 +1732,7 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
             regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
         sky=np.median(regrid_skyArr, axis = 0) 
-        outFileName=iterativeSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_iterative.fits"
+        outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_iterative.fits"
         write1DSpectrum(signal, sky, wavelength, outFileName)
 
         # 2d combined/extracted (filling in CRs with median sky and projecting to same wavelength scale)
@@ -1747,13 +1757,16 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
                     projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
                 projDataCube.append(projData)
         projDataCube=np.ma.masked_array(projDataCube)        
-        med=np.median(projDataCube, axis = 0)            
-        signal, sky, mData=weightedExtraction(med)#, subFrac = 0.95)
-        outFileName=specDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        med=np.median(projDataCube, axis = 0) 
+        if iterativeMethod == True:
+            signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
+        else:
+            signal, sky, mData=weightedExtraction(med)
+        outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, refWavelengths, outFileName)
         
         # Write 2d combined spectrum
-        outFileName=specDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        outFileName=stackExtractSpecDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         newImg=pyfits.HDUList()
         hdu=pyfits.PrimaryHDU(None, refHeader)   
         hdu.data=np.array(med)
@@ -1785,7 +1798,8 @@ if __name__ == '__main__':
     parser.add_argument("reducedDir", help="The directory where the reduced data will be written, along with any diagnostic data. This directory will be created if it doesn't already exist.")
     parser.add_argument("maskName", help="Use 'all' to reduce all data found under rawDir/, or 'list' to list all masks (by object) found under rawDir/. The maskName is made from the keyword combination OBJECT_MASKID found in the .fits headers.") 
     parser.add_argument("-t", "--threshold", dest="threshold", default=0.1, help="Threshold used for the slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline. Values in the range 0.1-0.4 work best (default=0.2; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
-    parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the spectral extraction algorithm (default=0.8; increase this value for faster convergence).")
+    parser.add_argument("-i", "--iterative-extraction", dest="iterativeMethod", action='store_true', help = "Enable the iterative spectral extraction method.")
+    parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the iterative spectral extraction algorithm (default=0.8; increase this value for faster convergence). This only has an effect if the -i switch is also used.")
     parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
 
     args = parser.parse_args()
@@ -1796,6 +1810,7 @@ if __name__ == '__main__':
     
     threshold=float(args.threshold)
     subFrac=float(args.subFrac)
+    iterativeMethod=args.iterativeMethod
     excludeMasks=args.excludeMasks.split(",")
     
     if os.path.exists(baseOutDir) == False:
@@ -1856,7 +1871,7 @@ if __name__ == '__main__':
         
         wavelengthCalibration2d(maskDict, outDir)
 
-        extractAndStackSpectra(maskDict, outDir, subFrac = subFrac)
+        extractAndStackSpectra(maskDict, outDir, iterativeMethod = iterativeMethod, subFrac = subFrac)
  
     
     
