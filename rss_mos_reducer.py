@@ -1313,7 +1313,7 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     return prof
     
 #-------------------------------------------------------------------------------------------------------------
-def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4, iterateProfile = True):
+def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, iterateProfile = False):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This is somewhat similar to the Horne optimal extraction algorithm. We solve:
 
@@ -1342,10 +1342,6 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4, iterateProfile
     """
 
     print "... extracting spectrum ..."
-    
-    #plt.matplotlib.interactive(True)
-    #IPython.embed()
-    #sys.exit()
     
     # Throw away rows at edges as these often contain noise
     throwAwayRows=2
@@ -1453,7 +1449,7 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4, iterateProfile
     return signal, skyTotal, mData
 
 #-------------------------------------------------------------------------------------------------------------
-def weightedExtraction_old(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0):
+def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This was (supposed) to be similar to the Horne optimal extraction. We solve:
 
@@ -1586,51 +1582,7 @@ def weightedExtraction_old(data, medColumns = 10, thresholdSigma = 30.0, sigmaCu
         # Add in the mask for chip gaps
         wn2d=wn2d+chipGapMask
         wn2d[np.greater(wn2d, 1)]=1.0
-        
-        # Now subtract sky model and re-estimate spatial profile
-        # NOTE: This seems to make cosmic rays have bigger impact
-        #prof=np.median(data-sky2d, axis = 1)
-        #prof=prof/prof.max()
-        #x0=np.where(prof == prof.max())[0][0]
-        #x=np.arange(prof.shape[0])
-        #sigmaRange=np.linspace(1, prof.shape[0]/2, prof.shape[0]*2)
-        #resArr=np.zeros(sigmaRange.shape[0])
-        #for i in range(len(sigmaRange)):
-            #s=sigmaRange[i]
-            #gauss=np.exp(-((x-x0)**2)/(2*s**2))
-            #resArr[i]=abs(prof-gauss).sum()
-            ##plt.plot(gauss)
-        #sigma=sigmaRange[np.where(resArr == resArr.min())]/2
-        #prof=np.exp(-((x-x0)**2)/(2*sigma**2))
-
-    #---
-    # Use masked array median - this actually seems to work better than what we were doing...
-    # NOTE: mask values of 1 are excluded, 0 included
-    # Room for improvement here (e.g., optimize traceHalfWidth for each object)
-    #traceHalfWidth=4
-    #prof=np.median(data, axis = 1)
-    #peakIndex=np.where(prof == prof.max())[0]
-    #x=np.arange(len(prof))
-    #xMin=peakIndex-traceHalfWidth
-    #if xMin < 0:
-        #xMin=0
-    #xMax=peakIndex+traceHalfWidth
-    #if xMax > len(prof)-1:
-        #xMax=len(prof)-1
-    #prof[:xMin]=0.0
-    #prof[xMax:]=0.0
-    
-    #skyMask=np.array([np.greater(prof, 0)]*data.shape[1], dtype = int).transpose()
-    #signalMask=np.array([np.equal(prof, 0)]*data.shape[1], dtype = int).transpose()
-    #mSky2d=np.ma.masked_array(data, skyMask+wn2d)
-    #mSignalPlusSky2d=np.ma.masked_array(data, signalMask+wn2d)
-    #sky=np.ma.median(mSky2d, axis = 0)
-    #signalPlusSky=np.ma.median(mSignalPlusSky2d, axis = 0)
-    
-    #signal=signalPlusSky-sky
-    
-    #---
-    
+            
     # We'll return masked array of the data - this has only CRs flagged (with 1s)
     mData=np.ma.masked_array(data, wn2d)
 
@@ -1640,18 +1592,6 @@ def weightedExtraction_old(data, medColumns = 10, thresholdSigma = 30.0, sigmaCu
     skyFill=np.ma.median(mData, axis = 0)
     for i in range(mData.shape[0]):
         mData[i][mData[i].mask]=skyFill[mData[i].mask]
-                
-    # Biweight
-    #bsSky=[]
-    #bsSignalPlusSky=[]
-    #for i in range(data.shape[1]):
-        #bsSky.append(astStats.biweightLocation(data[:, i][np.where(skyMask[:, i] == 0)], 9))
-        #bsSignalPlusSky.append(astStats.biweightLocation(data[:, i][np.where(signalMask[:, i] == 0)], 9)) 
-    #bsSky=np.array(bsSky, dtype = float)
-    #bsSky[np.isnan(bsSky)]=0.0
-    #bsSignalPlusSky=np.array(bsSignalPlusSky, dtype = float)
-    #bsSignalPlusSky[np.isnan(bsSignalPlusSky)]=0.0
-    #bsSignal=bsSignalPlusSky-bsSky
     
     return signal, sky, mData
 
@@ -1659,9 +1599,26 @@ def weightedExtraction_old(data, medColumns = 10, thresholdSigma = 30.0, sigmaCu
 def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
     """Extracts and stacks spectra from science frames which have already been wavelength calibrated.
     
-    subFrac is the fraction of the sky to be subtracted in each iteration of weightedExtraction.
+    subFrac is the fraction of the sky to be subtracted in each iteration of iterativeWeightedExtraction.
     
-    Output is in .fits table format.
+    Two methods are used for extracting spectra:
+    
+    1.  Individual 1d spectra are extracted from each science frame (using iterativeWeightedExtraction)
+        and then stacked. This might be desirable if object traces shift from frame-to-frame (as was
+        the case with early MOS data). These are placed under outDir/1DSpec_iterative/
+        
+    2.  The 2d spectra are stacked and then a 1d spectrum is extracted.
+        These are placed under outDir/1DSpec_2DSpec/. The stacked 2d spectra are also placed in this
+        directory.
+        
+    It seems like method (2) works best (Oct 2016).
+        
+    Cosmic rays are flagged in the first method, and masked out (replaced with sky) for the second method.
+    In both cases, the median is used to stack the frames (or 1D spectra), and of course all data are
+    projected onto a common wavelength scale first.
+    
+    Output 1d spectra are in .fits table format, with columns SPEC, SKYSPEC, and LAMBDA.
+    Output 2d spectra (written as outDir/1DSpec_2DSpec/2D_*.fits) are fits images.
         
     """
     
@@ -1669,10 +1626,14 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
     if os.path.exists(diagnosticsDir) == False:
         os.makedirs(diagnosticsDir)
      
-    onedspecDir=outDir+os.path.sep+"1DSpec"
-    if os.path.exists(onedspecDir) == False:
-        os.makedirs(onedspecDir)
+    iterativeSpecDir=outDir+os.path.sep+"1DSpec_iterative"
+    if os.path.exists(iterativeSpecDir) == False:
+        os.makedirs(iterativeSpecDir)
     
+    specDir=outDir+os.path.sep+"1DSpec_2DSpec"
+    if os.path.exists(specDir) == False:
+        os.makedirs(specDir)
+            
     # Get list of extensions
     cutArcPath=maskDict['cutArcDict'][maskDict['OBJECT'][0]]                
     img=pyfits.open(cutArcPath)
@@ -1725,16 +1686,16 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
                 # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
                 if np.nonzero(data)[0].shape[0] > 0:
                     
-                    signal, sky, mData=weightedExtraction(data, subFrac = subFrac)
-                    #signal, sky, mData=weightedExtraction_old(data)
+                    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac)
+                    #signal, sky, mData=weightedExtraction(data)
                     CRMaskedDataCube.append(mData)
                     signalList.append(signal)
                     skyList.append(sky)
                     headersList.append(header)
                     
-                    # Diagnostic plot
+                    # Diagnostic plot of smoothed spectrum
                     plt.figure()
-                    plt.plot(w, signal)
+                    plt.plot(w, ndimage.uniform_filter1d(signal, 15))
                     plt.xlabel("wavelength")
                     plt.ylabel("relative flux")
                     plotFileName=diagnosticsDir+os.path.sep+os.path.split(fileName)[-1].replace(".fits", "_%s_signal.png" % (extension))
@@ -1761,7 +1722,7 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
             regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
         sky=np.median(regrid_skyArr, axis = 0) 
-        outFileName=onedspecDir+os.path.sep+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        outFileName=iterativeSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_iterative.fits"
         write1DSpectrum(signal, sky, wavelength, outFileName)
 
         # 2d combined/extracted (filling in CRs with median sky and projecting to same wavelength scale)
@@ -1787,10 +1748,22 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
                 projDataCube.append(projData)
         projDataCube=np.ma.masked_array(projDataCube)        
         med=np.median(projDataCube, axis = 0)            
-        signal, sky, mData=weightedExtraction_old(med)
-        outFileName=onedspecDir+os.path.sep+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_CRMaskedCubeMethod.fits"
+        signal, sky, mData=weightedExtraction(med)#, subFrac = 0.95)
+        outFileName=specDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, refWavelengths, outFileName)
         
+        # Write 2d combined spectrum
+        print "Write 2d spectrum"
+        IPython.embed()
+        sys.exit()
+        outFileName=specDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        newImg=pyfits.HDUList()
+        hdu=pyfits.PrimaryHDU(None, refHeader)   
+        hdu.data=np.array(med)
+        newImg.append(hdu)
+        newImg.writeto(outFileName)
+        newImg.close()
+
 #-------------------------------------------------------------------------------------------------------------
 def write1DSpectrum(signal, sky, wavelength, outFileName):
     """Writes 1D spectrum to .fits table file.
@@ -1815,7 +1788,7 @@ if __name__ == '__main__':
     parser.add_argument("reducedDir", help="The directory where the reduced data will be written, along with any diagnostic data. This directory will be created if it doesn't already exist.")
     parser.add_argument("maskName", help="Use 'all' to reduce all data found under rawDir/, or 'list' to list all masks (by object) found under rawDir/. The maskName is made from the keyword combination OBJECT_MASKID found in the .fits headers.") 
     parser.add_argument("-t", "--threshold", dest="threshold", default=0.1, help="Threshold used for the slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline. Values in the range 0.1-0.4 work best (default=0.2; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
-    parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.4, help="Fraction of the sky background to be subtracted in each iteration of the spectral extraction algorithm (default=0.4; increase this value for faster convergence).")
+    parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the spectral extraction algorithm (default=0.8; increase this value for faster convergence).")
     parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
 
     args = parser.parse_args()
