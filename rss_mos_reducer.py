@@ -1732,7 +1732,7 @@ def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 
             regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
         sky=np.median(regrid_skyArr, axis = 0) 
-        outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_iterative.fits"
+        outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, wavelength, outFileName)
 
         # 2d combined/extracted (filling in CRs with median sky and projecting to same wavelength scale)
