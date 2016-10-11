@@ -1313,7 +1313,7 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     return prof
     
 #-------------------------------------------------------------------------------------------------------------
-def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4):
+def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4, iterateProfile = True):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This is somewhat similar to the Horne optimal extraction algorithm. We solve:
 
@@ -1377,7 +1377,8 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4):
     while diff > tolerance or k > maxIterations:
         t0=time.time()
         xArr=[]
-        prof=measureProfile(skySub, wn2d)   # non-running prof
+        if iterateProfile == True:
+            prof=measureProfile(skySub, wn2d)   # non-running prof
         for i in range(data.shape[1]):
             # Running prof - this behaves strangely...
             #runWidth=200
@@ -1403,8 +1404,9 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4):
             try:
                 x, R=optimize.nnls(A.transpose(), b)
             except:
-                # This column must be completely full of noise
-                x=np.zeros(data.shape[0]+2)
+                raise Exception, "nnls problem - full of noise?"
+                ## This column must be completely full of noise
+                #x=np.zeros(data.shape[0]+2)
             xArr.append(x)
         
         # Below here as usual
@@ -1417,7 +1419,7 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4):
         signalArr[k]=signal
         # CR rejection
         arr=skySub
-        thresholdSigma=15.0 # was 30
+        thresholdSigma=30.0 # was 30
         sigmaCut=3.0
         mean=0
         sigma=1e6
@@ -1445,13 +1447,10 @@ def weightedExtraction(data, maxIterations = 1000, subFrac = 0.4):
         # Keep track of sky, we don't want to report just the residual
         skyTotal=skyTotal+subFrac*sky
 
-    # Let's just use all of the above for CR-flagging
-    #mData=np.ma.masked_array(data, wn2d)
-        
-    #IPython.embed()
-    #sys.exit()
+    # Or... let's just use all of the above for CR-flagging
+    mData=np.ma.masked_array(data, wn2d)
     
-    return signal, skyTotal
+    return signal, skyTotal, mData
 
 #-------------------------------------------------------------------------------------------------------------
 def weightedExtraction_old(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0):
@@ -1726,9 +1725,9 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
                 # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
                 if np.nonzero(data)[0].shape[0] > 0:
                     
-                    signal, sky=weightedExtraction(data, subFrac = subFrac)
+                    signal, sky, mData=weightedExtraction(data, subFrac = subFrac)
                     #signal, sky, mData=weightedExtraction_old(data)
-                    #CRMaskedDataCube.append(mData)
+                    CRMaskedDataCube.append(mData)
                     signalList.append(signal)
                     skyList.append(sky)
                     headersList.append(header)
@@ -1747,24 +1746,6 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
                     signalList.append(np.zeros(data.shape[1]))
                     skyList.append(np.zeros(data.shape[1]))
 
-        # Restoring old method
-        #wavelengthsArr=np.array(wavelengthsList)
-        #wavelength=np.median(wavelengthsArr, axis = 0)
-        #regrid_CRMaskedDataCube=np.ma.zeros(CRMaskedDataCube)
-        #regrid_skyArr=np.zeros(skyArr.shape)
-        #for i in range(signalArr.shape[0]):
-            #tck=interpolate.splrep(wavelengthsArr[i], signalArr[i])
-            #regrid_signalArr[i]=interpolate.splev(wavelength, tck, ext = 1)
-            #tck=interpolate.splrep(wavelengthsArr[i], skyArr[i])
-            #regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
-        #signal=np.median(regrid_signalArr, axis = 0)
-        #sky=np.median(regrid_skyArr, axis = 0)
-        
-        #a=np.ma.median(CRMaskedDataCube, axis = 0)
-        #print "cube"
-        #IPython.embed()
-        #sys.exit()
-        
         # Make stacked spectrum - interpolate onto common wavelength scale, then take median
         # We could make this fancier (noise weighting etc.)...
         signalArr=np.array(signalList)
@@ -1779,20 +1760,53 @@ def extractAndStackSpectra(maskDict, outDir, subFrac = 0.4):
             tck=interpolate.splrep(wavelengthsArr[i], skyArr[i])
             regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
-        sky=np.median(regrid_skyArr, axis = 0)
-            
-        # Output as .fits tables, one per slit
-        specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
-        skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
-        lambdaColumn=pyfits.Column(name='LAMBDA', format='D', array=wavelength)
-        tabHDU=pyfits.new_table([specColumn, skyColumn, lambdaColumn])
-        tabHDU.name='1D_SPECTRUM'
-        HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
-        HDUList[0].header['MASKRA']=maskDict['RA']
-        HDUList[0].header['MASKDEC']=maskDict['DEC']
+        sky=np.median(regrid_skyArr, axis = 0) 
         outFileName=onedspecDir+os.path.sep+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        HDUList.writeto(outFileName, clobber=True)
-   
+        write1DSpectrum(signal, sky, wavelength, outFileName)
+
+        # 2d combined/extracted (filling in CRs with median sky and projecting to same wavelength scale)
+        # NOTE: These all have different wavelength calibrations stored in wavelengthsList
+        CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
+        projDataCube=[]
+        refWavelengths=None
+        refHeader=None
+        for data, wavelengths, header in zip(CRMaskedDataCube, wavelengthsList, headersList):
+            skyFill=np.ma.median(data, axis = 0)
+            for i in range(data.shape[0]):
+                data[i][data[i].mask]=skyFill[data[i].mask]
+            if refWavelengths == None:
+                refWavelengths=w
+                refHeader=header
+            if projDataCube == []:
+                projDataCube.append(data)
+            else:
+                projData=np.zeros(projDataCube[0].shape)
+                for i in range(min([projData.shape[0], data.shape[0]])):
+                    tck=interpolate.splrep(w, data.data[i])
+                    projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
+                projDataCube.append(projData)
+        projDataCube=np.ma.masked_array(projDataCube)        
+        med=np.median(projDataCube, axis = 0)            
+        signal, sky, mData=weightedExtraction_old(med)
+        outFileName=onedspecDir+os.path.sep+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_CRMaskedCubeMethod.fits"
+        write1DSpectrum(signal, sky, refWavelengths, outFileName)
+        
+#-------------------------------------------------------------------------------------------------------------
+def write1DSpectrum(signal, sky, wavelength, outFileName):
+    """Writes 1D spectrum to .fits table file.
+    
+    """
+    
+    specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
+    skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
+    lambdaColumn=pyfits.Column(name='LAMBDA', format='D', array=wavelength)
+    tabHDU=pyfits.new_table([specColumn, skyColumn, lambdaColumn])
+    tabHDU.name='1D_SPECTRUM'
+    HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
+    HDUList[0].header['MASKRA']=maskDict['RA']
+    HDUList[0].header['MASKDEC']=maskDict['DEC']
+    HDUList.writeto(outFileName, clobber=True)   
+    
 #-------------------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
 
@@ -1816,13 +1830,7 @@ if __name__ == '__main__':
     
     if os.path.exists(baseOutDir) == False:
         os.makedirs(baseOutDir)
-    
-    # Log what options we're running with
-    logFile=file(baseOutDir+os.path.sep+"rss_mos_reducer.log", "w")
-    for key in args.__dict__.keys():
-        logFile.write("%s: %s\n" % (key, str(args.__dict__[key])))
-    logFile.close()
-    
+        
     # Sort out what's what...
     infoDict=getImageInfo(rawDir)
     
@@ -1853,7 +1861,14 @@ if __name__ == '__main__':
         outDir=baseOutDir+os.path.sep+maskName
         if os.path.exists(outDir) == False:
             os.makedirs(outDir)
-        
+    
+        # Log what options we're running with
+        logFile=file(outDir+os.path.sep+"rss_mos_reducer.log", "w")
+        logFile.write("started: %s\n" % (datetime.datetime.now().isoformat()))
+        for key in args.__dict__.keys():
+            logFile.write("%s: %s\n" % (key, str(args.__dict__[key])))
+        logFile.close()
+    
         # Tied ourselves in knots a bit here...
         maskDict=infoDict[maskName][infoDict[maskName]['maskID']]
         maskDict['maskID']=infoDict[maskName]['maskID']
