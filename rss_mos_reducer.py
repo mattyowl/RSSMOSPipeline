@@ -245,13 +245,30 @@ def groupFilesListByTime(filesList, deltaHours = 0.5):
             outCTimeLists[-1].append(ctime)
             
     return outFileLists
+#-------------------------------------------------------------------------------------------------------------
+def writeDS9SlitRegions(regFileName, slitsDict, imageFileName):
+    """Write a DS9 .reg file showing location of the slits. The image corresponding to imageFileName is only
+    used to set the horizontal coordinates of the slit locations (i.e., so they are centred).
+    
+    """
+    
+    # Write out a .reg file so we can match slits to objects
+    img=pyfits.open(imageFileName)
+    centreColumn=img['SCI'].header['NAXIS1']/2
+    img.close()
+    outFile=file(regFileName, "w")
+    outFile.write("# DS9 region file\n")
+    outFile.write('global color=green dashlist=8 3 width=1 font="helvetica 10 normal" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n')
+    outFile.write("image\n")
+    for key in slitsDict.keys():
+        outFile.write("point(%.3f,%.3f) # point=boxcircle text={SLIT%d}\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0, key))            
+        outFile.write("box(%.1f,%.1f,%.1f,%.1f)\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0+1, centreColumn*2.0, (slitsDict[key]['yMax']-slitsDict[key]['yMin'])))
+    outFile.close()        
     
 #-------------------------------------------------------------------------------------------------------------
 def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
     """Cuts files into slitlets, making MEF files. 
-        
-    NOTE: assuming slits_0.txt file applies across all images for now.
-    
+            
     threshold is the parameter used by findSlits
     
     """
@@ -264,15 +281,17 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
         masterFlatPath=maskDict['masterFlats'][i]
         cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
         slitsDict=findSlits(masterFlatPath, threshold = threshold)
+        outFileName=makeOutputFileName(masterFlatPath, "c", outDir)
+        cutSlits(masterFlatPath, outFileName, slitsDict)
+        regFileName=outFileName.replace(".fits", "_slitLocations.reg")
+        writeDS9SlitRegions(regFileName, slitsDict, masterFlatPath)
         # Sanity check - do we find the same number of slits in all files?
         if numSlits == None:
             numSlits=len(slitsDict.keys())
         else:
             if numSlits != len(slitsDict.keys()):
-                raise Exception, "didn't find the same number of slits in all files - try using -t switch to adjust threshold"
+                raise Exception, "didn't find the same number of slits in all files - try using -t switch to adjust threshold, or removing the files that go into the problematic masterFlat_*.fits (use the cmasterFlat_*.reg files to check which flat gives missing slits)."
         maskDict['slitsDicts'][masterFlatPath]=slitsDict
-        outFileName=makeOutputFileName(masterFlatPath, "c", outDir)
-        cutSlits(masterFlatPath, outFileName, slitsDict)
         
     # Cut arcs, flats, matched here with appropriate object frames
     toCutList=maskDict['OBJECT']#+maskDict['ARC']
@@ -296,20 +315,9 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
         cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
         cutSlits(flatFileName, cutFlatFileName, slitsDict)
         maskDict['cutFlatDict'][f]=cutFlatFileName
-    
-        # Write out a .reg file so we can match slits to objects
-        img=pyfits.open(f)
-        centreColumn=img['SCI'].header['NAXIS1']/2
-        img.close()
+        # DS9 regions
         regFileName=outFileName.replace(".fits", "_slitLocations.reg")
-        outFile=file(regFileName, "w")
-        outFile.write("# DS9 region file\n")
-        outFile.write('global color=green dashlist=8 3 width=1 font="helvetica 10 normal" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n')
-        outFile.write("image\n")
-        for key in slitsDict.keys():
-            outFile.write("point(%.3f,%.3f) # point=boxcircle text={SLIT%d}\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0, key))            
-            outFile.write("box(%.1f,%.1f,%.1f,%.1f)\n" % (centreColumn, (slitsDict[key]['yMax']+slitsDict[key]['yMin'])/2.0+1, centreColumn*2.0, (slitsDict[key]['yMax']-slitsDict[key]['yMin'])))
-        outFile.close() 
+        writeDS9SlitRegions(regFileName, slitsDict, f)
         
 #-------------------------------------------------------------------------------------------------------------
 def cutIntoPseudoSlitLets(maskDict, outDir):
@@ -444,12 +452,9 @@ def findSlits(flatFileName, minSlitHeight = 10, threshold = 0.1):
     # Use grad to find edges
     prof=np.median(d, axis = 1)
     grad=np.gradient(prof)
-
-    #threshold=0.4   # was 0.1
-    featureMinPix=3
     plusMask=np.greater(grad, threshold)
     minusMask=np.less(grad, threshold*-1)
-    
+
     # This looks for alternating +/-, but will merge slits which butt up against each other
     slitsDict={}
     lookingFor=1
@@ -463,7 +468,7 @@ def findSlits(flatFileName, minSlitHeight = 10, threshold = 0.1):
                 lookingFor=0
         if lookingFor == 0:
             if minusMask[i] == True:
-                yMax=i+2
+                yMax=i
                 lookingFor=1
         if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
             slitCount=slitCount+1
