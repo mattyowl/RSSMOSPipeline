@@ -276,24 +276,46 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
     # We find slits using master flats, and store slit locations in a dictionary indexed by masterFlatPath
     # We have a routine to pull out a corresponding master flat (and hence slitsDict) for every image.
     maskDict['slitsDicts']={}
-    numSlits=None
     for i in range(len(maskDict['masterFlats'])):
         masterFlatPath=maskDict['masterFlats'][i]
         cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
         slitsDict=findSlits(masterFlatPath, threshold = threshold)
-        outFileName=makeOutputFileName(masterFlatPath, "c", outDir)
-        cutSlits(masterFlatPath, outFileName, slitsDict)
-        regFileName=outFileName.replace(".fits", "_slitLocations.reg")
-        writeDS9SlitRegions(regFileName, slitsDict, masterFlatPath)
-        # Sanity check - do we find the same number of slits in all files?
-        if numSlits == None:
-            numSlits=len(slitsDict.keys())
-        else:
-            if numSlits != len(slitsDict.keys()):
-                raise Exception, "didn't find the same number of slits in all files - try using -t switch to adjust threshold, or removing the files that go into the problematic masterFlat_*.fits (use the cmasterFlat_*.reg files to check which flat gives missing slits)."
         maskDict['slitsDicts'][masterFlatPath]=slitsDict
+
+    # To avoid problems with occasional missing slits (if we treat each flat separately), use
+    # the slits found from the first flat as a reference, and find the y-shifts between them
+    refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
+    img=pyfits.open(maskDict['masterFlats'][0])
+    height=img[1].data.shape[0]
+    ref=np.zeros(height)
+    for key in refDict.keys():
+        ref[refDict[key]['yCentre']]=1
+    shiftsDict={}
+    for key in maskDict['slitsDicts'].keys():
+        if key != maskDict['masterFlats'][0]:
+            slitsDict=maskDict['slitsDicts'][key]
+            g=np.zeros(height)
+            for skey in slitsDict.keys():
+                g[slitsDict[skey]['yCentre']]=1
+            corr, corrMax, shift=fftCorrelate(ref, g)
+            shiftsDict[key]=shift
+        else:
+            shiftsDict[key]=0.
+
+    # Remake all slits dictionaries, based on reference minus shift
+    newSlitsDicts={}
+    for i in range(len(maskDict['masterFlats'])):
+        objPath=maskDict['masterFlats'][i]
+        newSlitsDicts[objPath]={}
+        for key in refDict:
+            newSlitsDicts[objPath][key]={}
+            newSlitsDicts[objPath][key]['yMin']=refDict[key]['yMin']-int(round(shiftsDict[objPath]))
+            newSlitsDicts[objPath][key]['yMax']=refDict[key]['yMax']-int(round(shiftsDict[objPath]))
+    maskDict['slitsDicts']=newSlitsDicts
+    
+    # ^^^ Tidy all the above up later
         
-    # Cut arcs, flats, matched here with appropriate object frames
+    # Cut arcs, matched here with appropriate object frames
     toCutList=maskDict['OBJECT']#+maskDict['ARC']
     outCutList=makeOutputFileNameList(toCutList, "c", outDir)
     print ">>> It is a good idea to check that for the below the corresponding DS9 .reg file aligns with the slits and that object spectra are actually centred in the slits..."
@@ -316,16 +338,14 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
         cutSlits(flatFileName, cutFlatFileName, slitsDict)
         maskDict['cutFlatDict'][f]=cutFlatFileName
         # DS9 regions
-        regFileName=outFileName.replace(".fits", "_slitLocations.reg")
+        regFileName=flatFileName.replace(".fits", "_slitLocations.reg")
         writeDS9SlitRegions(regFileName, slitsDict, f)
         
 #-------------------------------------------------------------------------------------------------------------
 def cutIntoPseudoSlitLets(maskDict, outDir):
     """For longslit data. Finds objects, and then cuts into pseudo-slitlets: we take some region +/- Y pixels
     around the object trace and pretend that is a MOS slitlet. Outputs MEF files.
-        
-    NOTE: assuming slits_0.txt file applies across all images for now.
-    
+            
     """
         
     # Find object traces in OBJECT frames and cut +/- some distance in Y around them
@@ -430,7 +450,7 @@ def cutSlits(inFileName, outFileName, slitsDict):
     newImg.close()
     
 #-------------------------------------------------------------------------------------------------------------
-def findSlits(flatFileName, minSlitHeight = 10, threshold = 0.1):
+def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
     """Find the slits, without using any info from the mask design file...
     
     minSlitHeight is used to throw out any problematic weird too-narrow slits (if any)
@@ -472,7 +492,7 @@ def findSlits(flatFileName, minSlitHeight = 10, threshold = 0.1):
                 lookingFor=1
         if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
             slitCount=slitCount+1
-            slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax}    
+            slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax, 'yCentre': (yMax+yMin)/2.}    
             yMin=None
             yMax=None
     
