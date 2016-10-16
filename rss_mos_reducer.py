@@ -1103,7 +1103,8 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     return fitCoeffsArr
 
 #-------------------------------------------------------------------------------------------------------------
-def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, makeDiagnosticPlots = False):
+def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, extensionsList = "all",
+                                  makeDiagnosticPlots = False):
     """Applies the wavelength calibration, and rectification, to all extensions of inFileName, writing 
     output to outFileName. The wavelength calibration is provided in wavelengthCalibDict, where each key
     corresponds to each extension number (see findWavelengthCalibration)
@@ -1112,10 +1113,11 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
     
     print ">>> Applying wavelength calibration and rectifying (%s) ..." % (inFileName)
     img=pyfits.open(inFileName)
-    extensionsList=[]
-    for hdu in img:
-        if "SLIT" in hdu.name:
-            extensionsList.append(hdu.name)
+    if extensionsList == "all":
+        extensionsList=[]
+        for hdu in img:
+            if "SLIT" in hdu.name:
+                extensionsList.append(hdu.name)
                 
     for extension in extensionsList:
     
@@ -1182,7 +1184,7 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
     img.writeto(outFileName, clobber = True)
     
 #-------------------------------------------------------------------------------------------------------------
-def wavelengthCalibration2d(maskDict, outDir):
+def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
     """Finds 2d wavelength calibration from arc frames, applies to arc frames and object frames, rectifying
     them and also interpolating to a linear wavelength scale to make life easier later.
     
@@ -1204,10 +1206,11 @@ def wavelengthCalibration2d(maskDict, outDir):
               
         img=pyfits.open(cutArcPath)
         
-        extensionsList=[]
-        for hdu in img:
-            if "SLIT" in hdu.name:
-                extensionsList.append(hdu.name)
+        if extensionsList == "all":
+            extensionsList=[]
+            for hdu in img:
+                if "SLIT" in hdu.name:
+                    extensionsList.append(hdu.name)
 
         binning=img[0].header['CCDSUM'].replace(" ", "x")
         grating=img[0].header['GRATING']
@@ -1230,14 +1233,16 @@ def wavelengthCalibration2d(maskDict, outDir):
     for key in maskDict['cutArcDict'].keys():
         cutArcPath=maskDict['cutArcDict'][key]                
         rectArcPath=makeOutputFileName(cutArcPath, "rw", outDir)
-        wavelengthCalibrateAndRectify(cutArcPath, rectArcPath, maskDict['wavelengthCalib'][cutArcPath], makeDiagnosticPlots = True)
+        wavelengthCalibrateAndRectify(cutArcPath, rectArcPath, maskDict['wavelengthCalib'][cutArcPath],
+                                      extensionsList =extensionsList, makeDiagnosticPlots = True)
     
     # Apply the calibration to object spectra           
     for fileName in maskDict['OBJECT']:
         cutArcPath=maskDict['cutArcDict'][fileName]                
         cutPath=makeOutputFileName(fileName, "c", outDir)
         rectPath=makeOutputFileName(fileName, "rwc", outDir)
-        wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][cutArcPath])        
+        wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][cutArcPath], 
+                                      extensionsList = extensionsList)        
 
 #-------------------------------------------------------------------------------------------------------------
 #def measureProfile(data):
@@ -1652,7 +1657,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     return signal, sky, mData
 
 #-------------------------------------------------------------------------------------------------------------
-def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 0.4):
+def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMethod = False, subFrac = 0.4):
     """Extracts and stacks spectra from science frames which have already been wavelength calibrated.
         
     Two methods are used for extracting spectra:
@@ -1701,10 +1706,11 @@ def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 
     # Get list of extensions
     cutArcPath=maskDict['cutArcDict'][maskDict['OBJECT'][0]]                
     img=pyfits.open(cutArcPath)
-    extensionsList=[]
-    for hdu in img:
-        if "SLIT" in hdu.name:
-            extensionsList.append(hdu.name)
+    if extensionsList == "all":
+        extensionsList=[]
+        for hdu in img:
+            if "SLIT" in hdu.name:
+                extensionsList.append(hdu.name)
     
     # Debugging...
     #extensionsList=['SLIT9']
@@ -2030,6 +2036,7 @@ if __name__ == '__main__':
     parser.add_argument("-i", "--iterative-extraction", dest="iterativeMethod", action='store_true', help = "Enable the iterative spectral extraction method.")
     parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the iterative spectral extraction algorithm (default=0.8; increase this value for faster convergence). This only has an effect if the -i switch is also used.")
     parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
+    parser.add_argument("-s", "--slits", dest="extensionsList", default="all", help="Reduce the data corresponding to the given slit names only. Separate slit names with , but no spaces (e.g., -e SLIT9,SLIT15).")
 
     args = parser.parse_args()
 
@@ -2041,6 +2048,9 @@ if __name__ == '__main__':
     subFrac=float(args.subFrac)
     iterativeMethod=args.iterativeMethod
     excludeMasks=args.excludeMasks.split(",")
+    extensionsList=args.extensionsList
+    if extensionsList != "all":
+        extensionsList=extensionsList.split(",")
     
     if os.path.exists(baseOutDir) == False:
         os.makedirs(baseOutDir)
@@ -2098,9 +2108,9 @@ if __name__ == '__main__':
         
         applyFlatField(maskDict, outDir)
         
-        wavelengthCalibration2d(maskDict, outDir)
+        wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList)
 
-        extractAndStackSpectra(maskDict, outDir, iterativeMethod = iterativeMethod, subFrac = subFrac)
+        extractAndStackSpectra(maskDict, outDir, extensionsList = extensionsList, iterativeMethod = iterativeMethod, subFrac = subFrac)
  
     
     
