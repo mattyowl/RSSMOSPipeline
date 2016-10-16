@@ -1340,6 +1340,18 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
         print "nans in object profile"
         IPython.embed()
         sys.exit()
+        
+    # Sometimes we get rubbish in slit edges being counted as signal - spot that, and remove it
+    segmentationMap, numObjects=ndimage.label(prof)
+    if numObjects > 1:
+        sigPixMask=np.greater(prof, 0)
+        objIDs=np.unique(segmentationMap)
+        objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+        signalObjID=objIDs[np.where(objNumPix == objNumPix.max())][0]
+    for objID in objIDs:
+        if objID != signalObjID:
+            mask=np.equal(segmentationMap, objID)
+            prof[mask]=0
             
     return prof
     
@@ -1375,7 +1387,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
 
     print "... extracting spectrum ..."
     
-    ## Throw away rows at edges as these often contain noise
+    # Throw away rows at edges as these often contain noise
     #throwAwayRows=2
     #data=data[throwAwayRows:-throwAwayRows]
     
@@ -1392,7 +1404,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
             chipGapMask[np.equal(segmentationMap, objID)]=0.0
 
     # First measurement of the profile of the object
-    if runningProfile == None:
+    if np.any(runningProfile) == None:
         prof=measureProfile(data, np.zeros(data.shape))
     
     # Iterative sky subtraction
@@ -1533,7 +1545,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
 
     """
 
-    ## Throw away rows at edges as these often contain noise
+    # Throw away rows at edges as these often contain noise
     #throwAwayRows=2
     #data=data[throwAwayRows:-throwAwayRows]
     
@@ -1551,24 +1563,27 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
 
     # All of the below is really just CR rejection now...
     # Assume one object per slit and a fixed width
-    traceHalfWidth=4
-    prof=np.median(data, axis = 1)
-    peakIndex=np.where(prof == prof.max())[0]
-    x=np.arange(len(prof))
-    xMin=peakIndex-traceHalfWidth
-    try:
-        if xMin < 0:
-            xMin=0
-    except:
-        print "xMin seems to be array: check peakIndex"
-        IPython.embed()
-        sys.exit()
-    xMax=peakIndex+traceHalfWidth
-    if xMax > len(prof)-1:
-        xMax=len(prof)-1
-    prof[:xMin]=0.0
-    prof[xMax:]=0.0  
+    #traceHalfWidth=4
+    #prof=np.median(data, axis = 1)
+    #peakIndex=np.where(prof == prof.max())[0]
+    #x=np.arange(len(prof))
+    #xMin=peakIndex-traceHalfWidth
+    #try:
+        #if xMin < 0:
+            #xMin=0
+    #except:
+        #print "xMin seems to be array: check peakIndex"
+        #IPython.embed()
+        #sys.exit()
+    #xMax=peakIndex+traceHalfWidth
+    #if xMax > len(prof)-1:
+        #xMax=len(prof)-1
+    #prof[:xMin]=0.0
+    #prof[xMax:]=0.0  
 
+    # First measurement of the profile of the object
+    prof=measureProfile(data, np.zeros(data.shape))
+        
     # First pass guess at profile
     #res=data-np.array([np.median(data, axis = 0)]*data.shape[0])
     #prof=np.median(res, axis = 1)
@@ -1712,9 +1727,6 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
             if "SLIT" in hdu.name:
                 extensionsList.append(hdu.name)
     
-    # Debugging...
-    #extensionsList=['SLIT9']
-    
     # The way we stack... identify signal dominated rows and average them to a 1d spectrum, then stack all 1d
     # Do same for sky rows
     # They may all be projected onto slightly different wavelength coordinates system... have to deal with that also
@@ -1781,6 +1793,14 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                     signalList.append(np.zeros(data.shape[1]))
                     skyList.append(np.zeros(data.shape[1]))
 
+        # Wavelength calib diagnostic: does the sky line up from each science frame?
+        for sky, wavelengths in zip(skyList, wavelengthsList):
+            plt.plot(wavelengths, sky/np.median(sky))
+        plt.xlabel("Wavelength (Angstroms)")
+        plt.ylabel("Relative Flux")
+        plt.savefig(diagnosticsDir+os.path.sep+"skyCheck.png")
+        plt.close()
+                    
         # Make stacked spectrum - interpolate onto common wavelength scale, then take median
         # We could make this fancier (noise weighting etc.)...
         signalArr=np.array(signalList)
@@ -1820,16 +1840,18 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                     projMask[i][np.less(projMask[i], 0.1)]=0.
                     projMask[i]=np.array(projMask[i], dtype = bool)
                 projDataCube.append(np.ma.masked_array(projData, projMask))
-        projDataCube=np.ma.masked_array(projDataCube)        
-        med=np.ma.median(projDataCube, axis = 0) 
-        #if iterativeMethod == True:
-            #signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
-        #else:
-            #signal, sky, mData=weightedExtraction(med)
-        t0=time.time()
-        signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
-        t1=time.time()
-        print "... final extraction (took %.3f sec) ..." % (t1-t0)
+        projDataCube=np.ma.masked_array(projDataCube)       
+        # Very slow if use the masked array below...
+        med=np.array(np.ma.median(projDataCube, axis = 0))   
+        if iterativeMethod == True:
+            signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
+        else:
+            signal, sky, mData=weightedExtraction(med)
+        # Experimenting with a method that will handle running profile
+        #t0=time.time()
+        #signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
+        #t1=time.time()
+        #print "... final extraction (took %.3f sec) ..." % (t1-t0)
         
         outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, refWavelengths, outFileName)
@@ -1844,13 +1866,13 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         newImg.close()
 
         # Write 2d, sky subtracted combined spectrum
-        outFileName=stackExtractSpecDir+os.path.sep+"2D_noSky_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        newImg=pyfits.HDUList()
-        hdu=pyfits.PrimaryHDU(None, refHeader)   
-        hdu.data=np.array(skySubbed2d)
-        newImg.append(hdu)
-        newImg.writeto(outFileName, clobber = True)
-        newImg.close()
+        #outFileName=stackExtractSpecDir+os.path.sep+"2D_noSky_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        #newImg=pyfits.HDUList()
+        #hdu=pyfits.PrimaryHDU(None, refHeader)   
+        #hdu.data=np.array(skySubbed2d)
+        #newImg.append(hdu)
+        #newImg.writeto(outFileName, clobber = True)
+        #newImg.close()
 
 #-------------------------------------------------------------------------------------------------------------
 def maskNoisyData(data, sigmaCut = 3.0):
@@ -1967,6 +1989,7 @@ def finalExtraction(data, subFrac = 0.8):
     for i in range(data.shape[1]):
         runningProf[:, i]=np.exp(-((x-traceCentre[i])**2)/(2*traceSigma**2))
 
+    # New ---
     # Iterative sky subtraction, with the object trace we found
     signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf, iterateProfile = False)
 
@@ -1975,23 +1998,23 @@ def finalExtraction(data, subFrac = 0.8):
     skySubbed2d=data-sky2d
     
     # Old ---
-    ## Fancy weighted extraction, assuming we have no noise now (masked CRs and replaced with sky earlier)
-    ##signal=np.zeros(data.shape[1])
-    ##sky=np.zeros(data.shape[1])
-    ##for i in range(data.shape[1]):
-        ##A=np.mat([runningProf[:, i], np.ones(data.shape[0])]).transpose()
-        ##b=data[:, i]
-        ###X=np.dot(np.linalg.pinv(A), b)
-        ###signal[i]=X[0, 0]
-        ###sky[i]=X[0, 1]
-        ##X, R=optimize.nnls(A, b)
-        ##signal[i]=X[0]
-        ##sky[i]=X[1]
-    ## Or... this simple method seems to work better on sky subtraction
-    ## But won't work if signal dominated?
+    # Fancy weighted extraction, assuming we have no noise now (masked CRs and replaced with sky earlier)
+    #signal=np.zeros(data.shape[1])
+    #sky=np.zeros(data.shape[1])
+    #for i in range(data.shape[1]):
+        #A=np.mat([runningProf[:, i], np.ones(data.shape[0])]).transpose()
+        #b=data[:, i]
+        ##X=np.dot(np.linalg.pinv(A), b)
+        ##signal[i]=X[0, 0]
+        ##sky[i]=X[0, 1]
+        #X, R=optimize.nnls(A, b)
+        #signal[i]=X[0]
+        #sky[i]=X[1]
+    # Or... this simple method seems to work better on sky subtraction
+    # But won't work if signal dominated?
     #sky=np.median(data, axis = 0)   # This won't work if signal dominated.
     
-    ## Final answer...
+    # Final answer...
     #sky2d=np.array([sky]*data.shape[0])
     #skySubbed2d=data-sky2d
     #signal=np.average(skySubbed2d, weights = runningProf, axis = 0)
@@ -2002,10 +2025,10 @@ def finalExtraction(data, subFrac = 0.8):
     #---
 
     # Zap the chip gaps (again)
-    chipGapMask1d=np.greater(np.median(chipGapMask, axis = 0), 0)
-    signal[chipGapMask1d]=0.
-    sky[chipGapMask1d]=0.
-    skySubbed2d[np.where(chipGapMask == 1)]=0.
+    #chipGapMask1d=np.greater(np.median(chipGapMask, axis = 0), 0)
+    #signal[chipGapMask1d]=0.
+    #sky[chipGapMask1d]=0.
+    #skySubbed2d[np.where(chipGapMask == 1)]=0.
     
     return signal, sky, skySubbed2d
 
