@@ -18,6 +18,7 @@ import argparse
 from scipy import interpolate
 from scipy import ndimage
 from scipy import optimize
+from scipy import stats
 import pickle
 import IPython
 #plt.matplotlib.interactive(True)
@@ -1125,7 +1126,7 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
         fitCoeffsArr=wavelengthCalibDict[extension]
         
         # Can carry on if wavelength calib fails for a slit... fix later...
-        if fitCoeffsArr != None:
+        if np.any(fitCoeffsArr) != None:
             
             # Using above, make an array containing wavelengths
             wavelengthsMap=np.zeros(data.shape)
@@ -1338,7 +1339,8 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     return prof
     
 #-------------------------------------------------------------------------------------------------------------
-def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, iterateProfile = False):
+def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runningProfile = None,
+                                iterateProfile = False):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This is somewhat similar to the Horne optimal extraction algorithm. We solve:
 
@@ -1368,9 +1370,9 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, itera
 
     print "... extracting spectrum ..."
     
-    # Throw away rows at edges as these often contain noise
-    throwAwayRows=2
-    data=data[throwAwayRows:-throwAwayRows]
+    ## Throw away rows at edges as these often contain noise
+    #throwAwayRows=2
+    #data=data[throwAwayRows:-throwAwayRows]
     
     # Find the chip gaps and make a mask
     lowMaskValue=2.0
@@ -1385,7 +1387,8 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, itera
             chipGapMask[np.equal(segmentationMap, objID)]=0.0
 
     # First measurement of the profile of the object
-    prof=measureProfile(data, np.zeros(data.shape))
+    if runningProfile == None:
+        prof=measureProfile(data, np.zeros(data.shape))
     
     # Iterative sky subtraction
     wn2d=np.zeros(data.shape)+chipGapMask               # Treat chip gaps as noise
@@ -1398,9 +1401,11 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, itera
     while diff > tolerance or k > maxIterations:
         t0=time.time()
         xArr=[]
-        if iterateProfile == True:
+        if iterateProfile == True and runningProfile == None:
             prof=measureProfile(skySub, wn2d)   # non-running prof
         for i in range(data.shape[1]):
+            if np.any(runningProfile) != None:
+                prof=runningProfile[:, i]
             # Running prof - this behaves strangely...
             #runWidth=200
             #iMin=i-runWidth
@@ -1414,7 +1419,11 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, itera
             b=skySub[:, i]
             A=np.zeros([b.shape[0]+2, b.shape[0]])
             A[0]=prof
-            A[1]=1.-prof 
+            # Sky should be same everywhere... if something stands out, it isn't sky, so zap
+            # This should take care of any rubbish at slit edges causing oversubtracted sky
+            skyMask=maskNoisyData(b)
+            skyMask=np.equal(skyMask, False)
+            A[1]=np.array(skyMask, dtype = int)#1.#(1.-prof) 
             # CR masking
             wn=wn2d[:, i]
             for j in range(b.shape[0]):
@@ -1474,6 +1483,21 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, itera
     return signal, skyTotal, mData
 
 #-------------------------------------------------------------------------------------------------------------
+def identifySky(data):
+    """Scan the data by column, and flag pixels as being within +/- 3 sigma of the mean in the column.
+    
+    Returns a 2d array of sky weights, for use by weightedExtraction and iterativeWeightedExtraction.
+    
+    """
+
+    skyMask2d=np.zeros(data.shape)
+    for i in range(data.shape[1]):
+        skyMask2d[:, i]=maskNoisyData(data[:, i])
+        skyMask2d[:, i]=np.equal(skyMask2d[:, i], 0)
+    
+    return skyMask2d
+
+#-------------------------------------------------------------------------------------------------------------
 def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This was (supposed) to be similar to the Horne optimal extraction. We solve:
@@ -1496,22 +1520,17 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
 
     We do all this column by column. 
     
-    It turns out this is a great way to get the cosmic rays, but lousy for sky line subtraction.
+    It turns out this is a great way to get the cosmic rays, but not great for sky line subtraction.
     
-    So, for the actual extraction, we're using masked array median. There is room for improvement here...
-
-    Returns extracted signal, sky (both 1d) and 2d masked array of data with CRs flagged
+    Returns extracted signal, sky (both 1d) and 2d masked array of data with CRs flagged.
     We also fill CR-flagged pixels with median sky (in case want to regrid later for using
     other extraction methods)
-    
-    NOTE: This version of the routine replaced in May 2016 with new iterative method (but left in for now
-    for comparison purposes).
-    
+
     """
 
-    # Throw away rows at edges as these often contain noise
-    throwAwayRows=2
-    data=data[throwAwayRows:-throwAwayRows]
+    ## Throw away rows at edges as these often contain noise
+    #throwAwayRows=2
+    #data=data[throwAwayRows:-throwAwayRows]
     
     # Find the chip gaps and make a mask
     lowMaskValue=2.0
@@ -1549,6 +1568,9 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     #res=data-np.array([np.median(data, axis = 0)]*data.shape[0])
     #prof=np.median(res, axis = 1)
     
+    # Which rows to use as sky?
+    skyMask2d=identifySky(data)
+    
     # Fit/extract signal, sky (but really this is just a good way to find and mask cosmic rays)
     wn2d=np.zeros(data.shape)+chipGapMask               # Treat chip gaps as noise
     ws2d=np.zeros(data.shape)
@@ -1558,12 +1580,18 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
         sky=np.zeros(data.shape[1])
         signal=np.zeros(data.shape[1])
         for i in range(data.shape[1]):
-            
             # See testWeightedExtraction2.py, testWeightedExtraction4.py for alternatives using SVD, pseudoInverse etc. 
             v=data[:, i]
             w=np.zeros((v.shape[0], 2+v.shape[0]))
             w[:, 0]=prof.reshape(w[:, 0].shape)     # signal weight - varies across rows
-            w[:, 1]=1                               # sky weight - needs to be the same across all rows
+            # Sky should be same everywhere... if something stands out, it isn't sky, so zap
+            # This should take care of any rubbish at slit edges causing oversubtracted sky
+            #skyMask=maskNoisyData(v)
+            #skyMask=np.equal(skyMask, False)
+            w[:, 1]=skyMask2d[:, i]#np.array(skyMask, dtype = int)#1.#(1.-prof) 
+            #t3=time.time()
+            #print t1-t0, t2-t1, t3-t2
+            #w[:, 1]=1                               # sky weight - needs to be the same across all rows
             wn=wn2d[:, i]
             for j in range(v.shape[0]):
                 w[j, 2+j]=wn[j]                     # noise weights - if 1, zap that pixel (CR or bad)
@@ -1592,11 +1620,14 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
         mean=0
         sigma=1e6
         for i in range(20):
+            lastSigma=sigma
             gtrZeroMask=np.greater(arr, lowMaskValue)
             mask=np.less(abs(arr-mean), sigmaCut*sigma)
             mask=np.logical_and(gtrZeroMask, mask)
             mean=np.mean(arr[mask])
             sigma=np.std(arr[mask])
+            if lastSigma == sigma:
+                break
         detectionThreshold=thresholdSigma*sigma
         wn2d=np.array(np.greater(arr-mean, detectionThreshold), dtype = float)
         wn2d[np.less(arr, 0)]=0.0
@@ -1713,7 +1744,6 @@ def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 
                     
                 if w[0] != header['CRVAL1']:
                     raise Exception, "wavelength of pixel 0 doesn't correspond to CRVAL1 - what happened?"
-                wavelengthsList.append(w)
                 
                 # Extract signal, sky and CR-flagged 2d spectrum data
                 # If blank slit (which it would be if we skipped over something failing earlier), insert blank row
@@ -1722,10 +1752,13 @@ def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 
                     if iterativeMethod == True:
                         signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac)
                     else:
+                        t0=time.time()
                         signal, sky, mData=weightedExtraction(data)
+                        t1=time.time()
                     CRMaskedDataCube.append(mData)
                     signalList.append(signal)
                     skyList.append(sky)
+                    wavelengthsList.append(w)
                     headersList.append(header)
                     
                     # Diagnostic plot of smoothed spectrum
@@ -1760,33 +1793,38 @@ def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 
         outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, wavelength, outFileName)
 
-        # 2d combined/extracted (filling in CRs with median sky and projecting to same wavelength scale)
+        # 2d combined/extracted, projecting CR-masked arrays to same wavelength grid
         # NOTE: These all have different wavelength calibrations stored in wavelengthsList
+        # NOTE: This assumes that the wavelength calibrations have similar accuracy... if [0] has a problem, then we do!
         CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
         projDataCube=[]
-        refWavelengths=None
-        refHeader=None
+        refWavelengths=wavelengthsArr[0]
+        refHeader=headersList[0]
         for data, wavelengths, header in zip(CRMaskedDataCube, wavelengthsList, headersList):
-            skyFill=np.ma.median(data, axis = 0)
-            for i in range(data.shape[0]):
-                data[i][data[i].mask]=skyFill[data[i].mask]
-            if refWavelengths == None:
-                refWavelengths=w
-                refHeader=header
             if projDataCube == []:
                 projDataCube.append(data)
             else:
                 projData=np.zeros(projDataCube[0].shape)
+                projMask=np.zeros(projDataCube[0].shape)
                 for i in range(min([projData.shape[0], data.shape[0]])):
                     tck=interpolate.splrep(w, data.data[i])
                     projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
-                projDataCube.append(projData)
+                    tck=interpolate.splrep(w, data.mask[i])
+                    projMask[i]=interpolate.splev(refWavelengths, tck, ext = 1)
+                    projMask[i][np.less(projMask[i], 0.1)]=0.
+                    projMask[i]=np.array(projMask[i], dtype = bool)
+                projDataCube.append(np.ma.masked_array(projData, projMask))
         projDataCube=np.ma.masked_array(projDataCube)        
-        med=np.median(projDataCube, axis = 0) 
-        if iterativeMethod == True:
-            signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
-        else:
-            signal, sky, mData=weightedExtraction(med)
+        med=np.ma.median(projDataCube, axis = 0) 
+        #if iterativeMethod == True:
+            #signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
+        #else:
+            #signal, sky, mData=weightedExtraction(med)
+        t0=time.time()
+        signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
+        t1=time.time()
+        print "... final extraction (took %.3f sec) ..." % (t1-t0)
+        
         outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, refWavelengths, outFileName)
         
@@ -1796,8 +1834,174 @@ def extractAndStackSpectra(maskDict, outDir, iterativeMethod = False, subFrac = 
         hdu=pyfits.PrimaryHDU(None, refHeader)   
         hdu.data=np.array(med)
         newImg.append(hdu)
-        newImg.writeto(outFileName)
+        newImg.writeto(outFileName, clobber = True)
         newImg.close()
+
+        # Write 2d, sky subtracted combined spectrum
+        outFileName=stackExtractSpecDir+os.path.sep+"2D_noSky_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        newImg=pyfits.HDUList()
+        hdu=pyfits.PrimaryHDU(None, refHeader)   
+        hdu.data=np.array(skySubbed2d)
+        newImg.append(hdu)
+        newImg.writeto(outFileName, clobber = True)
+        newImg.close()
+
+#-------------------------------------------------------------------------------------------------------------
+def maskNoisyData(data, sigmaCut = 3.0):
+    """Return a mask with zeros for data with values < sigma*sigmaCut selected. 
+    
+    """
+
+    mean=0
+    sigma=1e6
+    for i in range(20):
+        lastSigma=sigma
+        nonZeroMask=np.not_equal(data, 0)
+        mask=np.less(abs(data-mean), sigmaCut*sigma)
+        mask=np.logical_and(nonZeroMask, mask)
+        mean=np.mean(data[mask])
+        sigma=np.std(data[mask])
+        if sigma == lastSigma:
+            break            
+    mask=np.greater(abs(data-mean), sigmaCut*sigma)
+
+    return mask
+    
+#-------------------------------------------------------------------------------------------------------------
+def fitProfile(data, mask, borderPix = 4):
+    """Fit the profile in the y-direction, with a truncated Gaussian. We downweight pixels towards the edge
+    of the slit, because sometimes there is junk there (from cutting it). This means we might miss some
+    objects where the trace is towards the edge of the slit.
+    
+    mask is used to mask noise (or at least chip gaps)
+    
+    Returns the centre of the Gaussian profile, and its sigma. If everything was masked, returns
+    [-99, -99], so these can easily be masked out.
+    
+    """
+    
+    # Prior - upweight pixels near centre, for finding the centre of the object trace
+    prior=np.zeros(data.shape[0])
+    prior[borderPix:-borderPix]=1
+    prior=ndimage.uniform_filter1d(prior, borderPix)
+    
+    # First, flag noisy pixels
+    noiseMask=maskNoisyData(data)
+    mData=np.ma.masked_array(data, np.logical_or(mask, noiseMask))#NoisyData(data, sigmaCut = 2.0)    
+    
+    prof=np.ma.median(mData, axis = 1)
+    
+    if prof.mask.sum() == prof.shape[0]:
+        # All is masked
+        return -99, -99
+    
+    prof=prof*prior
+    prof=prof/prof.max()
+    x0=np.where(prof == prof.max())[0][0]
+    x=np.arange(prof.shape[0])
+    sigmaRange=np.linspace(1, prof.shape[0]/2, prof.shape[0]*2)
+    resArr=np.zeros(sigmaRange.shape[0])
+    for i in range(len(sigmaRange)):
+        s=sigmaRange[i]
+        gauss=np.exp(-((x-x0)**2)/(2*s**2))
+        resArr[i]=((prof-gauss)**2).sum()
+        #plt.plot(gauss)
+    sigma=sigmaRange[np.where(resArr == resArr.min())]/2
+    #fittedProf=np.exp(-((x-x0)**2)/(2*sigma**2))
+    
+    return x0, sigma
+    
+#-------------------------------------------------------------------------------------------------------------
+def finalExtraction(data, subFrac = 0.8):
+    """This fits for the object trace, so it can vary in y-position along the slit. Does a very simple
+    extraction, which still appears to be working better for sky subtraction than the fancier attempts.
+    
+    Returns signal, sky, and 2d sky-subtracted spectrum 
+    
+    """
+
+    # Find the chip gaps and make a mask
+    lowMaskValue=2.0
+    minPix=1000
+    chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
+    segmentationMap, numObjects=ndimage.label(chipGapMask)
+    sigPixMask=np.equal(chipGapMask, 1)
+    objIDs=np.unique(segmentationMap)
+    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+    for objID, nPix in zip(objIDs, objNumPix):    
+        if nPix < minPix:
+            chipGapMask[np.equal(segmentationMap, objID)]=0.0
+    
+    # Initial mask
+    wn2d=np.zeros(data.shape)+chipGapMask               # Treat chip gaps as noise
+        
+    # Running profile measurement
+    profCentres=np.zeros(data.shape[1])
+    profSigmas=np.zeros(data.shape[1])
+    for i in range(data.shape[1]):
+        runWidth=100
+        iMin=i-runWidth
+        iMax=i+runWidth
+        if iMin < 0:
+            iMin=0
+        if iMax > data.shape[1]-1:
+            iMax=data.shape[1]-1
+        profCentres[i], profSigmas[i]=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
+
+    # Fit for trace centre, just use median for trace width sigma (doesn't vary by that much)
+    x=np.arange(data.shape[1])
+    mask=np.greater(profCentres, 0) # fitProfile returns -99 for completely masked data
+    result=stats.linregress(x[mask], profCentres[mask])
+    traceCentre=x*result.slope+result.intercept
+    traceSigma=np.median(profSigmas[mask])
+    
+    # Make 2d running profile
+    runningProf=np.zeros(data.shape)
+    x=np.arange(data.shape[0])
+    for i in range(data.shape[1]):
+        runningProf[:, i]=np.exp(-((x-traceCentre[i])**2)/(2*traceSigma**2))
+
+    # Iterative sky subtraction, with the object trace we found
+    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf, iterateProfile = False)
+
+    # Make 2d sky-subtracted spectrum
+    sky2d=np.array([sky]*data.shape[0])
+    skySubbed2d=data-sky2d
+    
+    # Old ---
+    ## Fancy weighted extraction, assuming we have no noise now (masked CRs and replaced with sky earlier)
+    ##signal=np.zeros(data.shape[1])
+    ##sky=np.zeros(data.shape[1])
+    ##for i in range(data.shape[1]):
+        ##A=np.mat([runningProf[:, i], np.ones(data.shape[0])]).transpose()
+        ##b=data[:, i]
+        ###X=np.dot(np.linalg.pinv(A), b)
+        ###signal[i]=X[0, 0]
+        ###sky[i]=X[0, 1]
+        ##X, R=optimize.nnls(A, b)
+        ##signal[i]=X[0]
+        ##sky[i]=X[1]
+    ## Or... this simple method seems to work better on sky subtraction
+    ## But won't work if signal dominated?
+    #sky=np.median(data, axis = 0)   # This won't work if signal dominated.
+    
+    ## Final answer...
+    #sky2d=np.array([sky]*data.shape[0])
+    #skySubbed2d=data-sky2d
+    #signal=np.average(skySubbed2d, weights = runningProf, axis = 0)
+
+    ## This just makes things work better in visualTemplateRedshift
+    #signal[np.less(signal, 0)]=0. 
+       
+    #---
+
+    # Zap the chip gaps (again)
+    chipGapMask1d=np.greater(np.median(chipGapMask, axis = 0), 0)
+    signal[chipGapMask1d]=0.
+    sky[chipGapMask1d]=0.
+    skySubbed2d[np.where(chipGapMask == 1)]=0.
+    
+    return signal, sky, skySubbed2d
 
 #-------------------------------------------------------------------------------------------------------------
 def write1DSpectrum(signal, sky, wavelength, outFileName):
