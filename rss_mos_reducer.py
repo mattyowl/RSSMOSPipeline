@@ -877,7 +877,7 @@ def fftCorrelate(f, g):
 
 #-------------------------------------------------------------------------------------------------------------
 def minFunc_findScale(s, shift, arcRow, normRefModel, data_x):
-    """For optimize.minimise - return 1/corrMax
+    """For optimize.minimise_scalar.
     
     """
     
@@ -894,11 +894,51 @@ def minFunc_findScale(s, shift, arcRow, normRefModel, data_x):
     return overlap
 
 #-------------------------------------------------------------------------------------------------------------
-def findScaleAndShift(arcRow, refModelDict):
-    """Find best fit stretch and scale to transform arcRow to reference model
+def minFunc_findShift(shift, scale, arcRow, normRefModel, data_x):
+    """For optimize.minimise_scalar.
     
     """
+    
+    tck=interpolate.splrep((data_x+shift)+scale*data_x, arcRow)
+    arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
+    arcMean=np.mean(arcRow_scaled)
+    arcStd=np.std(arcRow_scaled)
+    
+
+    # Old style: minimize what we call overlap below - this behaves well with optimize.minimize
+    # (overlap vs scale is a function with a clear minimum)
+    overlap=np.trapz(abs(normRefModel[:data_x.shape[0]]-(arcRow_scaled-arcMean)/arcStd))
         
+    return overlap
+
+#-------------------------------------------------------------------------------------------------------------
+def minFunc_findShiftAndScale(x, arcRow, normRefModel, data_x):
+    """For optimize.minimise - return 1/corrMax
+    
+    """
+    
+    shift=x[0]
+    s=x[1]
+    tck=interpolate.splrep((data_x+shift)+s*data_x, arcRow)
+    arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
+    arcMean=np.mean(arcRow_scaled)
+    arcStd=np.std(arcRow_scaled)
+    
+    # Old style: minimize what we call overlap below - this behaves well with optimize.minimize
+    # (overlap vs scale is a function with a clear minimum)
+    overlap=np.trapz(abs(normRefModel[:data_x.shape[0]]-(arcRow_scaled-arcMean)/arcStd))
+        
+    return overlap
+
+#-------------------------------------------------------------------------------------------------------------
+def findScaleAndShift(arcRow, refModelDict, quick = False):
+    """Find best fit stretch and scale to transform arcRow to reference model
+    
+    Use quick = True to skip the basinhopping brute force algorithm (needed for accurate wavelength 
+    calibration, but not for the model selection step)
+    
+    """
+    
     # Use cross correlation to get initial guess at shift between arc and model
     shift=np.argmax(np.correlate(refModelDict['arc_centreRow'], arcRow, mode = 'full'))-refModelDict['arc_centreRow'].shape[0]
     
@@ -913,7 +953,7 @@ def findScaleAndShift(arcRow, refModelDict):
     modelMean=np.mean(refModelDict['arc_centreRow'])
     normRefModel=(refModelDict['arc_centreRow']-modelMean)/modelStd
     
-    result=optimize.minimize_scalar(minFunc_findScale, bounds = (-0.02, 0.02), method = 'Bounded', 
+    result=optimize.minimize_scalar(minFunc_findScale, bounds = (-0.04, 0.04), method = 'Bounded', 
                                     args = (shift, arcRow, normRefModel, data_x))
     s=result['x']
     
@@ -923,7 +963,14 @@ def findScaleAndShift(arcRow, refModelDict):
     arcMean=np.mean(arcRow_scaled)
     arcStd=np.std(arcRow_scaled)
     corr, corrMax, extraShift=fftCorrelate(normRefModel, (arcRow_scaled-arcMean)/arcStd)    
-    
+
+    # This brute force approach is robust... optimize.minimize is not
+    # And we checked... it is better to do it in this order!
+    if quick == False:
+        result=optimize.basinhopping(minFunc_findShiftAndScale, [shift, s], minimizer_kwargs = {'args': (arcRow, normRefModel, data_x), 'bounds': [[shift-100, shift+100], [-0.04, 0.04]]})
+        shift=result['x'][0]
+        s=result['x'][1]
+   
     return corrMax, s, shift
   
 #-------------------------------------------------------------------------------------------------------------
@@ -956,7 +1003,7 @@ def selectBestRefModel(modelFileNameList, arcData, thresholdSigma = 2.0):
         # Replaced np.correlate with fft based correlation
         # Find shift and wavelength dependent scale change (stretch, then shift)
         arcRow=arcData[arcData.shape[0]/2]
-        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict)
+        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = True)
         bestCorrMaxList.append(bestCorrMax)
         bestFitScaleList.append(bestFitScale)
         bestFitShiftList.append(bestFitShift)
@@ -968,6 +1015,8 @@ def selectBestRefModel(modelFileNameList, arcData, thresholdSigma = 2.0):
     arcSegMap=arcSegMapsList[bestModelIndex]
     bestFitScale=bestFitScaleList[bestModelIndex]
     bestFitShift=bestFitShiftList[bestModelIndex]
+    
+    print "... using refModel = %s ..." % (modelFileNameList[bestModelIndex])
     
     return refModelDict, arcFeatureTable, arcSegMap
     
@@ -993,17 +1042,57 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # Continue with previous 2d wavelength calib method
     yIndex=arcData.shape[0]/2
     arcRow=arcData[yIndex]
-    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict)
+    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = False)
     arc_centreRow=arcRow
     
-    # Sanity check plot
+    # Sanity check plot - this is key, if this is off, all is off
+    #plt.matplotlib.interactive(True)
     data_x=np.arange(0, arc_centreRow.shape[0])        
     x=np.arange(0, len(arc_centreRow))
     arc_x_shifted=x*(1+bestFitScale)+bestFitShift
-    #plt.plot(x, refModelDict['arc_centreRow'][:data_x.shape[0]]/refModelDict['arc_centreRow'][:data_x.shape[0]].mean(), 'b-')
-    #plt.plot(arc_x_shifted, arc_centreRow/arc_centreRow.mean(), 'r-')
-    #plt.close()
+    plt.figure(figsize = (15, 10))
+    plt.plot(x, refModelDict['arc_centreRow'][:data_x.shape[0]]/refModelDict['arc_centreRow'][:data_x.shape[0]].mean(), 'b-', label ='ref model')
+    plt.plot(arc_x_shifted, arc_centreRow/arc_centreRow.mean(), 'r-', label = 'transformed arc')
+    plt.semilogy()
+    plt.legend()
+    plt.savefig(diagnosticsDir+os.path.sep+"arcTransformTest_"+diagnosticsLabel+".png")
+    plt.close()
     
+    # New - based on J0018 skyCheck.png, the old method is better...
+    ## Calibration from the reference model
+    ## Then use bestFitScale, bestFitShift to transform
+    ##plt.matplotlib.interactive(True)
+    #transformed_model_x=(refModelDict['featureTable']['x_centreRow']-bestFitShift)/(1+bestFitScale)
+    #fitCoeffs=np.polyfit(transformed_model_x, refModelDict['featureTable']['wavelength'], order)
+    #wavelengthCalibPoly=np.poly1d(fitCoeffs)
+    #wavelengths=wavelengthCalibPoly(transformed_model_x)
+    #plt.plot(transformed_model_x, refModelDict['featureTable']['wavelength'], 'r.')
+    #plt.plot(transformed_model_x, wavelengths, 'b-')
+    #plt.xlabel("Transformed x (pix)")
+    #plt.ylabel("Wavelength (Angstroms)")
+    #plt.savefig(diagnosticsDir+os.path.sep+"transformedFeaturesFit_"+diagnosticsLabel+".png")
+    #plt.close()
+
+    ## Heck, let's just get best fit shifts over the slit
+    ## Fix the scale to that found for centreRow
+    #shifts=[]
+    #data_x=np.arange(0, arcRow.shape[0])        
+    #modelStd=np.std(refModelDict['arc_centreRow'])
+    #modelMean=np.mean(refModelDict['arc_centreRow'])
+    #normRefModel=(refModelDict['arc_centreRow']-modelMean)/modelStd
+    #fitCoeffsArr=[]
+    #for y in range(arcData.shape[0]):
+        #t0=time.time()
+        #result=optimize.minimize_scalar(minFunc_findShift, bounds = (bestFitShift-50, bestFitShift+50), 
+                                        #method = 'Bounded', args = (bestFitScale, arcData[y], 
+                                                                    #normRefModel, data_x))
+        #shift=result['x']
+        #transformed_model_x=(refModelDict['featureTable']['x_centreRow']-shift)/(1+bestFitScale)
+        #fitCoeffs=np.polyfit(transformed_model_x, refModelDict['featureTable']['wavelength'], order)
+        #fitCoeffsArr.append(fitCoeffs)
+    #fitCoeffsArr=np.array(fitCoeffsArr)
+        
+    # Old ---    
     # Tag features by transforming model coords to arc coords and looking for closest match
     # Looking at above sanity plot, seems like the weak link here is centroiding done for 
     # x_centreRow in arcFeatureTable?
@@ -1023,7 +1112,10 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     #plt.plot(arcData[arcData.shape[0]/2], 'b-')
     #for row in arcFeatureTable:
         #plt.text(row['x_centreRow'], row['amplitude'], row['wavelength'])
-    #plt.close()
+    ##plt.close()
+    #print "sanity check tag"
+    #IPython.embed()
+    #sys.exit()
     
     # Fit wavelength solution on centre row to check order of fit
     # We can't go to higher order if we get something nonsensical (double valued)
@@ -1082,7 +1174,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
             print "WARNING: wavelength calib failed"
             return None
     fitCoeffsArr=np.array(fitCoeffsArr)
-    
+
     # Sanity check: wavelength calibration model with tagged features
     if diagnosticsLabel != None and diagnosticsDir != None:
         yCheck=arcData.shape[0]/2
@@ -1092,6 +1184,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
         plt.plot(arcFeatureTable['wavelength'], arcFeatureTable['amplitude'], 'bo')
         for row in arcFeatureTable:
             plt.text(row['wavelength'], row['amplitude'], row['wavelength'])
+        plt.semilogy()
         plt.savefig(diagnosticsDir+os.path.sep+"taggedFeatures_%s.png" % (diagnosticsLabel))
         plt.close()
 
@@ -1099,6 +1192,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     #if diagnosticsLabel == 'SLIT15':
         #IPython.embed()
         #sys.exit()
+    #---
     
     return fitCoeffsArr
 
@@ -1148,7 +1242,13 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
             FITSRefPixel=1                              # Remember index from 1 is FITS convention
             rectWavelengthsMap=np.array([linearWavelengthRange]*data.shape[0])
             #astImages.saveFITS("rectWavelengthsMap.fits", rectWavelengthsMap, None)
-
+            
+            # Debugging
+            #if os.path.split(inFileName)[-1] == "cmbxgpP201211100057.fits":
+                #print "check mapping of spectra to .fits"
+                #IPython.embed()
+                #sys.exit()
+                
             # Remap the data to our preferred linear wavelength scale
             # Assume we can treat each row independently
             # Save linear spectral WCS in header
@@ -1234,7 +1334,7 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
         cutArcPath=maskDict['cutArcDict'][key]                
         rectArcPath=makeOutputFileName(cutArcPath, "rw", outDir)
         wavelengthCalibrateAndRectify(cutArcPath, rectArcPath, maskDict['wavelengthCalib'][cutArcPath],
-                                      extensionsList =extensionsList, makeDiagnosticPlots = True)
+                                      extensionsList = extensionsList, makeDiagnosticPlots = True)
     
     # Apply the calibration to object spectra           
     for fileName in maskDict['OBJECT']:
@@ -1243,37 +1343,7 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
         rectPath=makeOutputFileName(fileName, "rwc", outDir)
         wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][cutArcPath], 
                                       extensionsList = extensionsList)        
-
-#-------------------------------------------------------------------------------------------------------------
-#def measureProfile(data):
-    #"""Robust measurement of the profile of the object, used to weight the signal in weightedExtraction.
-    #Assumes the object is somewhere near the centre of the slit.
-    
-    #"""
-    
-    #print "Make the prof robust"
-    #IPython.embed()
-    #sys.exit()
-    
-    ## Assume one object per slit and a fixed width
-    #traceHalfWidth=4
-    #prof=np.median(data, axis = 1)
-    #peakIndex=np.where(prof == prof.max())[0]
-    #x=np.arange(len(prof))
-    #xMin=peakIndex-traceHalfWidth
-    #try:
-        #if xMin < 0:
-            #xMin=0
-    #except:
-        #print "xMin seems to be array: check peakIndex"
-        #IPython.embed()
-        #sys.exit()
-    #xMax=peakIndex+traceHalfWidth
-    #if xMax > len(prof)-1:
-        #xMax=len(prof)-1
-    #prof[:xMin]=0.0
-    #prof[xMax:]=0.0 
-    
+   
 #-------------------------------------------------------------------------------------------------------------
 def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 3.):
     """Used in the spectral extraction to fit the object profile in the y direction.
@@ -1348,10 +1418,10 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
         objIDs=np.unique(segmentationMap)
         objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
         signalObjID=objIDs[np.where(objNumPix == objNumPix.max())][0]
-    for objID in objIDs:
-        if objID != signalObjID:
-            mask=np.equal(segmentationMap, objID)
-            prof[mask]=0
+        for objID in objIDs:
+            if objID != signalObjID:
+                mask=np.equal(segmentationMap, objID)
+                prof[mask]=0
             
     return prof
     
@@ -1583,11 +1653,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
 
     # First measurement of the profile of the object
     prof=measureProfile(data, np.zeros(data.shape))
-        
-    # First pass guess at profile
-    #res=data-np.array([np.median(data, axis = 0)]*data.shape[0])
-    #prof=np.median(res, axis = 1)
-    
+            
     # Which rows to use as sky?
     skyMask2d=identifySky(data)
     
@@ -1606,11 +1672,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
             w[:, 0]=prof.reshape(w[:, 0].shape)     # signal weight - varies across rows
             # Sky should be same everywhere... if something stands out, it isn't sky, so zap
             # This should take care of any rubbish at slit edges causing oversubtracted sky
-            #skyMask=maskNoisyData(v)
-            #skyMask=np.equal(skyMask, False)
             w[:, 1]=skyMask2d[:, i]#np.array(skyMask, dtype = int)#1.#(1.-prof) 
-            #t3=time.time()
-            #print t1-t0, t2-t1, t3-t2
             #w[:, 1]=1                               # sky weight - needs to be the same across all rows
             wn=wn2d[:, i]
             for j in range(v.shape[0]):
@@ -1702,7 +1764,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         
     """
     
-    diagnosticsDir=outDir+os.path.sep+"extractionDiagnostics"
+    diagnosticsDir=outDir+os.path.sep+"diagnostics"
     if os.path.exists(diagnosticsDir) == False:
         os.makedirs(diagnosticsDir)
      
@@ -1794,11 +1856,19 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                     skyList.append(np.zeros(data.shape[1]))
 
         # Wavelength calib diagnostic: does the sky line up from each science frame?
+        checkSkyLines=[5577, 5893, 6300]  # [OI], NaI, [OI] sky lines, for checking wavelength calib
+        fluxMax=0
         for sky, wavelengths in zip(skyList, wavelengthsList):
-            plt.plot(wavelengths, sky/np.median(sky))
+            flux=sky/np.median(sky)
+            if flux.max() > fluxMax:
+                fluxMax=flux.max()
+            plt.plot(wavelengths, flux)
+        for l in checkSkyLines:
+            plt.plot([l]*10, np.linspace(0, fluxMax, 10), 'k--')
+        plt.ylim(0, fluxMax)
         plt.xlabel("Wavelength (Angstroms)")
         plt.ylabel("Relative Flux")
-        plt.savefig(diagnosticsDir+os.path.sep+"skyCheck.png")
+        plt.savefig(diagnosticsDir+os.path.sep+"skyCheck_"+extension+".png")
         plt.close()
                     
         # Make stacked spectrum - interpolate onto common wavelength scale, then take median
