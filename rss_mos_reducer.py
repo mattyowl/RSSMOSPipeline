@@ -28,7 +28,27 @@ LOGFILE=None
 REF_MODEL_DIR="modelArcSpectra"
 
 # For checking wavelength calibration accuracy
-checkSkyLines=[5577, 5893, 6300]  # [OI], NaI, [OI] sky lines, for checking wavelength calib
+# Useful plot: http://www.astro.keele.ac.uk/jkt/GrSpInstructions/skylines1.jpg
+checkSkyLines=[5577.0, 
+               5893.0, 
+               6300.304,
+               6363.708,
+               6863.955,
+               6923.220,
+               7276.405,
+               7316.282,
+               7340.885,
+               7750.640,
+               7794.112,
+               7821.503,
+               7913.708,
+               7993.332,
+               8344.602,
+               8399.170,
+               8430.174,
+               8761.314,
+               8767.912,
+               8778.333]
 
 #-------------------------------------------------------------------------------------------------------------
 def trace(message, verbose = True, logFile = None):

@@ -24,7 +24,9 @@ files, found under ```reducedDir/OBJECT_MASKID/diagnostics/```. These plot the s
 
 The size in Angstroms of any offset from prominent sky lines in each final stacked spectrum is logged in ```reducedDir/OBJECT_MASKID/diagnostics/skyWavelengthCalibCheck.csv```. As well as the median offset
 of identified sky lines with respect to their reference wavelengths, the results averaged across all
-slits are listed at the bottom of this file (look for "all slits median" and "all slits RMS").
+slits are listed at the bottom of this file (look for "all slits median" and "all slits RMS"). This 
+test shows that wavelength calibration using the pg0900 Ne (2x2 binning) reference model is good to 
+~< 1 Angstrom. Other reference models have not been tested yet.
 
 ## Software needed
 
