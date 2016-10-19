@@ -968,38 +968,66 @@ def findScaleAndShift(arcRow, refModelDict, quick = False):
     calibration, but not for the model selection step)
     
     """
-    
-    # Use cross correlation to get initial guess at shift between arc and model
-    shift=np.argmax(np.correlate(refModelDict['arc_centreRow'], arcRow, mode = 'full'))-refModelDict['arc_centreRow'].shape[0]
-    
-    # Sometimes the refModel is shorter by a pixel than arcRow (we can handle the reverse case)
-    # NOTE: added when adapting MOS pipeline to work on longslit
-    if arcRow.shape[0] > refModelDict['arc_centreRow'].shape[0]:
-        arcRow=arcRow[:refModelDict['arc_centreRow'].shape[0]]
-    
-    # New optimize based method (robust when used with overlap method, but not with xcorr)
-    data_x=np.arange(0, arcRow.shape[0])        
-    modelStd=np.std(refModelDict['arc_centreRow'])
-    modelMean=np.mean(refModelDict['arc_centreRow'])
-    normRefModel=(refModelDict['arc_centreRow']-modelMean)/modelStd
-    
-    result=optimize.minimize_scalar(minFunc_findScale, bounds = (-0.04, 0.04), method = 'Bounded', 
-                                    args = (shift, arcRow, normRefModel, data_x))
-    s=result['x']
-    
-    # xcorr is still best to use for selecting between models with corrMax
-    tck=interpolate.splrep((data_x+shift)+s*data_x, arcRow)
+
+    #---
+    # A fast brute force method... but it's stochastic, so we have to be careful...
+    # It turns out that the huge line at 6965.43 Angstroms in the Ar lamp can throw off cross correlation
+    # So, we divide by a moving average first to level things out somewhat
+    smoothScaled_refModelArc=refModelDict['arc_centreRow']/ndimage.uniform_filter1d(refModelDict['arc_centreRow'], 40)
+    smoothScaled_arcRow=arcRow/ndimage.uniform_filter1d(arcRow, 40)
+    modelStd=np.std(smoothScaled_refModelArc)
+    modelMean=np.mean(smoothScaled_refModelArc)
+    normRefModel=(smoothScaled_refModelArc-modelMean)/modelStd
+    data_x=np.arange(0, smoothScaled_arcRow.shape[0])        
+    result=optimize.differential_evolution(minFunc_findShiftAndScale, [[-500, 500], [-0.1, 0.1]], 
+                          args = (smoothScaled_arcRow, normRefModel, data_x), popsize = 100)
+    if result['success'] == False:
+        raise Exception, "differential_evolution failed"
+    shift=result['x'][0]
+    s=result['x'][1]
+
+    # We only need this bit for selecting the best arc based on corrMax
+    tck=interpolate.splrep((data_x+shift)+s*data_x, smoothScaled_arcRow)
     arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
     arcMean=np.mean(arcRow_scaled)
     arcStd=np.std(arcRow_scaled)
-    corr, corrMax, extraShift=fftCorrelate(normRefModel, (arcRow_scaled-arcMean)/arcStd)    
+    normArcRow_scaled=(arcRow_scaled-arcMean)/arcStd
+    corr, corrMax, extraShift=fftCorrelate(normRefModel, normArcRow_scaled)    
 
-    # This brute force approach is robust... optimize.minimize is not
-    # And we checked... it is better to do it in this order!
-    if quick == False:
-        result=optimize.basinhopping(minFunc_findShiftAndScale, [shift, s], minimizer_kwargs = {'args': (arcRow, normRefModel, data_x), 'bounds': [[shift-100, shift+100], [-0.04, 0.04]]})
-        shift=result['x'][0]
-        s=result['x'][1]
+    #---
+    ## NOTE: This bit works on Ne, Xe
+    ## Use cross correlation to get initial guess at shift between arc and model
+    #shift=np.argmax(np.correlate(refModelDict['arc_centreRow'], arcRow, mode = 'full'))-refModelDict['arc_centreRow'].shape[0]
+    
+    ## Sometimes the refModel is shorter by a pixel than arcRow (we can handle the reverse case)
+    ## NOTE: added when adapting MOS pipeline to work on longslit
+    #if arcRow.shape[0] > refModelDict['arc_centreRow'].shape[0]:
+        #arcRow=arcRow[:refModelDict['arc_centreRow'].shape[0]]
+    
+    ## New optimize based method (robust when used with overlap method, but not with xcorr)
+    #data_x=np.arange(0, arcRow.shape[0])        
+    #modelStd=np.std(refModelDict['arc_centreRow'])
+    #modelMean=np.mean(refModelDict['arc_centreRow'])
+    #normRefModel=(refModelDict['arc_centreRow']-modelMean)/modelStd
+    
+    #result=optimize.minimize_scalar(minFunc_findScale, bounds = (-0.1, 0.1), method = 'Bounded', 
+                                    #args = (shift, arcRow, normRefModel, data_x))
+    #s=result['x']
+    
+    ## xcorr is still best to use for selecting between models with corrMax
+    #tck=interpolate.splrep((data_x+shift)+s*data_x, arcRow)
+    #arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
+    #arcMean=np.mean(arcRow_scaled)
+    #arcStd=np.std(arcRow_scaled)
+    #corr, corrMax, extraShift=fftCorrelate(normRefModel, (arcRow_scaled-arcMean)/arcStd)    
+
+    ## This brute force approach is robust... optimize.minimize is not
+    ## And we checked... it is better to do it in this order!
+    #if quick == False:
+        #result=optimize.basinhopping(minFunc_findShiftAndScale, [shift, s], minimizer_kwargs = {'args': (arcRow, normRefModel, data_x), 'bounds': [[shift-100, shift+100], [-0.1, 0.1]]})
+        #shift=result['x'][0]
+        #s=result['x'][1]
+    #---
    
     return corrMax, s, shift
   
@@ -1070,14 +1098,14 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
                                                                 thresholdSigma = thresholdSigma)
 
     # Continue with previous 2d wavelength calib method
-    # This step is important, but not crucial
+    # This step is important, but not crucial (although when it does go wrong, it is spectacular)
     # This just affects which lines are cross-identified between the arc and the reference model
     # The quick = True method is okay, but isn't as good as the quick = False method, however...
     # quick = True takes ~0.04 sec
     # quick = False takes ~40 sec
     yIndex=arcData.shape[0]/2
     arcRow=arcData[yIndex]
-    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = True)
+    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = False)
     arc_centreRow=arcRow
     
     # Sanity check plot
@@ -1091,7 +1119,6 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     plt.semilogy()
     plt.legend()
     plt.savefig(diagnosticsDir+os.path.sep+"arcTransformTest_"+diagnosticsLabel+".png")
-    plt.close()
     
     # New - based on J0018 skyCheck.pngs, the old method is better...
     ## Calibration from the reference model

@@ -13,7 +13,7 @@ import os
 import sys
 import pyfits
 import atpy
-from astLib import *
+#from astLib import *
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import ndimage
@@ -244,61 +244,6 @@ def findWavelengthCalibration(arcFileName, modelFileName, sigmaCut = 3.0, thresh
     plt.close()
     
     return fitCoeffsArr
-
-#-------------------------------------------------------------------------------------------------------------
-def wavelengthCalibrateAndRectify(inFileName, outFileName, fitCoeffsArr):
-    """Applies the wavelength calibration, and rectification, to 2d spectrum in inFileName, writing 
-    output to outFileName. The wavelength calibration is provided in fitCoeffsArr (see 
-    findWavelengthCalibration)
-    
-    """
-    
-    img=pyfits.open(inFileName)
-    data=img[0].data
-    header=img[0].header
-    
-    # Using above, make an array containing wavelengths
-    wavelengthsMap=np.zeros(data.shape)
-    for y in range(data.shape[0]):
-        wavelengthCalibPoly=np.poly1d(fitCoeffsArr[y])
-        wavelengthsMap[y]=wavelengthCalibPoly(np.arange(data.shape[1]))
-    #astImages.saveFITS("wavelengthsMap.fits", wavelengthsMap, None)
-    
-    # How we would want our wavelength map to look after applying some transformation
-    # To make things easier later, make a linear wavelength scale
-    wavelengths_centreRow=wavelengthsMap[wavelengthsMap.shape[0]/2]
-    maxWavelength=wavelengths_centreRow.max()
-    minWavelength=wavelengths_centreRow.min()
-    linearWavelengthRange=np.linspace(minWavelength, maxWavelength, data.shape[1])
-    FITSWavelengthScale=linearWavelengthRange[1]-linearWavelengthRange[0]
-    FITSRefLambda=linearWavelengthRange[0]
-    FITSRefPixel=1                              # Remember index from 1 is FITS convention
-    rectWavelengthsMap=np.array([linearWavelengthRange]*data.shape[0])
-    #astImages.saveFITS("rectWavelengthsMap.fits", rectWavelengthsMap, None)
-
-    # Remap the data to our preferred linear wavelength scale
-    # Assume we can treat each row independently
-    # Save linear spectral WCS in header
-    rectifiedData=np.zeros(data.shape)
-    for y in range(data.shape[0]):
-        tck=interpolate.splrep(wavelengthsMap[y], data[y])
-        rectifiedData[y]=interpolate.splev(rectWavelengthsMap[y], tck)
-    header['CTYPE1']='LINEAR'
-    header['DISPAXIS']=1
-    header['CRVAL1']=FITSRefLambda
-    header['CRPIX1']=FITSRefPixel
-    header['CD1_1']=FITSWavelengthScale
-    header['CDELT1']=FITSWavelengthScale
-    header['CUNIT1']='Angstroms'
-    newImg=pyfits.HDUList()
-    hdu=pyfits.PrimaryHDU(None, header)   
-    hdu.data=rectifiedData
-    newImg.append(hdu)
-    newImg.writeto(outFileName, clobber = True)
-    
-    # Sanity check plot: linear wavelength scale
-    plt.plot(rectWavelengthsMap[data.shape[0]/2], rectifiedData[data.shape[0]/2], 'r-')
-    plt.close()
     
 #-------------------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
@@ -344,13 +289,5 @@ if __name__ == '__main__':
     
     approxCoordsDict=parseApproxArcCoordsFile(coordsFileName)
 
-    # Makes the reference model
     makeModelArcSpectrum(data, approxCoordsDict, modelFileName, row)
-    sys.exit()
     
-    # Test wavelength calibration and rectification - this will make it into pipeline code once ready
-    #testFileName="testArc1.fits"
-    testFileName=arcFileName
-    #testFileName="testArc3.fits"
-    wavelengthCalibCoeffs=findWavelengthCalibration(testFileName, modelFileName)
-    wavelengthCalibrateAndRectify(testFileName, "wavelengthCalib_"+testFileName, wavelengthCalibCoeffs)
