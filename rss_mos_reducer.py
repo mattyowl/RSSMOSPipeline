@@ -961,7 +961,7 @@ def minFunc_findShiftAndScale(x, arcRow, normRefModel, data_x):
     return overlap
 
 #-------------------------------------------------------------------------------------------------------------
-def findScaleAndShift(arcRow, refModelDict, numScales = 100):
+def findScaleAndShift(arcRow, refModelDict, numScales = 101, quick = False):
     """Find best fit stretch and scale to transform arcRow to reference model.
     
     Returns maxmimum of cross correlation, and corresponding best fit scale and shift
@@ -997,7 +997,19 @@ def findScaleAndShift(arcRow, refModelDict, numScales = 100):
     shift=shiftsList[index]
     corrMax=corrMaxList[index]
     s=scalesArr[index]
-        
+    
+    # Optional final touch up with differential_evolution
+    if quick == False:
+        t0=time.time()
+        result=optimize.differential_evolution(minFunc_findShiftAndScale, [[shift-20, shift+20], [s-0.03, s+0.03]], 
+                                            args = (smoothScaled_arcRow, normRefModel, data_x), popsize = 50)
+        t1=time.time()
+        print "... %.3f sec for differential_evolution ..." % (t1-t0)
+        if result['success'] == False:
+            raise Exception, "differential_evolution failed"
+        shift=result['x'][0]
+        s=result['x'][1]
+    
     #---
     # A fast brute force method... but it's stochastic, so we have to be careful...
     # It turns out that the huge line at 6965.43 Angstroms in the Ar lamp can throw off cross correlation
@@ -1058,7 +1070,7 @@ def selectBestRefModel(modelFileNameList, arcData, thresholdSigma = 2.0):
         # Replaced np.correlate with fft based correlation
         # Find shift and wavelength dependent scale change (stretch, then shift)
         arcRow=arcData[arcData.shape[0]/2]
-        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict)
+        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = True)
         bestCorrMaxList.append(bestCorrMax)
         bestFitScaleList.append(bestFitScale)
         bestFitShiftList.append(bestFitShift)
@@ -1099,7 +1111,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # This just affects which lines are cross-identified between the arc and the reference model
     yIndex=arcData.shape[0]/2
     arcRow=arcData[yIndex]
-    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict)
+    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = True)
     arc_centreRow=arcRow
     
     # Sanity check plot
@@ -1107,14 +1119,16 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     data_x=np.arange(0, arc_centreRow.shape[0])        
     x=np.arange(0, len(arc_centreRow))
     arc_x_shifted=x*(1+bestFitScale)+bestFitShift
-    plt.figure(figsize = (15, 10))
+    #plt.figure(figsize = (15, 10))
     plt.plot(x, refModelDict['arc_centreRow'][:data_x.shape[0]]/refModelDict['arc_centreRow'][:data_x.shape[0]].mean(), 'b-', label ='ref model')
     plt.plot(arc_x_shifted, arc_centreRow/arc_centreRow.mean(), 'r-', label = 'transformed arc')
     plt.title("shift = %.3f, scale = %.3f" % (bestFitShift, bestFitScale))
     plt.semilogy()
     plt.legend()
     plt.savefig(diagnosticsDir+os.path.sep+"arcTransformTest_"+diagnosticsLabel+".png")
-    plt.close()
+    plt.close()    
+    #IPython.embed()
+    #sys.exit()
     
     # New - based on J0018 skyCheck.pngs, the old method is better...
     ## Calibration from the reference model
@@ -1794,16 +1808,17 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     return signal, sky, mData
 
 #-------------------------------------------------------------------------------------------------------------
-def checkWavelengthCalibUsingSky(sky, header, featureMinPix = 5):
+def checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5):
     """Checks the wavelength calibration using the sky spectrum, matching against prominent lines.
     
     Returns the median wavelength offset (in Angstroms), and the number of lines used in the measurement.
     
     """
     
-    wavelengths=np.arange(sky.shape[0])*header['CDELT1']+header['CRVAL1']
+    cdelt=wavelengths[1]-wavelengths[0]
+    crval1=wavelengths[0]
     featureTable, segMap=detectLines(sky, featureMinPix = featureMinPix)
-    featureTable.add_column('wavelength', featureTable['x_centreRow']*header['CDELT1']+header['CRVAL1'])
+    featureTable.add_column('wavelength', featureTable['x_centreRow']*cdelt+crval1)
     diffs=[]
     for c in checkSkyLines:
         if c > wavelengths.min() and c < wavelengths.max():
@@ -1935,16 +1950,18 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                     
                 else:
                     print "WARNING: empty slit"
-                    signalList.append(np.zeros(data.shape[1]))
-                    skyList.append(np.zeros(data.shape[1]))
+                    #signalList.append(np.zeros(data.shape[1]))
+                    #skyList.append(np.zeros(data.shape[1]))
 
         # Wavelength calib diagnostic: does the sky line up from each science frame?
         fluxMax=0
-        for sky, wavelengths in zip(skyList, wavelengthsList):
+        for sky, wavelengths, header in zip(skyList, wavelengthsList, headersList):
             flux=sky/np.median(sky)
             if flux.max() > fluxMax:
                 fluxMax=flux.max()
             plt.plot(wavelengths, flux)
+            medianOffset, numLines=checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5)
+            print "... individual frame - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" %(medianOffset, numLines)
         for l in checkSkyLines:
             plt.plot([l]*10, np.linspace(0, fluxMax, 10), 'k--')
         plt.ylim(0, fluxMax)
@@ -1958,36 +1975,38 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         signalArr=np.array(signalList)
         skyArr=np.array(skyList)
         wavelengthsArr=np.array(wavelengthsList)
-        wavelength=np.median(wavelengthsArr, axis = 0)
+        regrid_wavelengths=np.median(wavelengthsArr, axis = 0)
         regrid_signalArr=np.zeros(signalArr.shape)
         regrid_skyArr=np.zeros(skyArr.shape)
         for i in range(signalArr.shape[0]):
             tck=interpolate.splrep(wavelengthsArr[i], signalArr[i])
-            regrid_signalArr[i]=interpolate.splev(wavelength, tck, ext = 1)
+            regrid_signalArr[i]=interpolate.splev(regrid_wavelengths, tck, ext = 1)
             tck=interpolate.splrep(wavelengthsArr[i], skyArr[i])
-            regrid_skyArr[i]=interpolate.splev(wavelength, tck, ext = 1) 
+            regrid_skyArr[i]=interpolate.splev(regrid_wavelengths, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
         sky=np.median(regrid_skyArr, axis = 0) 
+        medianOffset, numLines=checkWavelengthCalibUsingSky(sky, regrid_wavelengths, featureMinPix = 5)
+        print "... extractAndStack - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
         outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        write1DSpectrum(signal, sky, wavelength, outFileName)
-
+        write1DSpectrum(signal, sky, regrid_wavelengths, outFileName)
+        
         # 2d combined/extracted, projecting CR-masked arrays to same wavelength grid
         # NOTE: These all have different wavelength calibrations stored in wavelengthsList
         # NOTE: This assumes that the wavelength calibrations have similar accuracy... if [0] has a problem, then we do!
         CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
         projDataCube=[]
-        refWavelengths=wavelengthsArr[0]
+        refWavelengths=wavelengthsList[0]
         refHeader=headersList[0]
-        for data, wavelengths, header in zip(CRMaskedDataCube, wavelengthsList, headersList):
+        for data, wavelengths in zip(CRMaskedDataCube, wavelengthsList):
             if projDataCube == []:
                 projDataCube.append(data)
             else:
                 projData=np.zeros(projDataCube[0].shape)
                 projMask=np.zeros(projDataCube[0].shape)
                 for i in range(min([projData.shape[0], data.shape[0]])):
-                    tck=interpolate.splrep(w, data.data[i])
+                    tck=interpolate.splrep(wavelengths, data.data[i])
                     projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
-                    tck=interpolate.splrep(w, data.mask[i])
+                    tck=interpolate.splrep(wavelengths, data.mask[i])
                     projMask[i]=interpolate.splev(refWavelengths, tck, ext = 1)
                     projMask[i][np.less(projMask[i], 0.1)]=0.
                     projMask[i]=np.array(projMask[i], dtype = bool)
@@ -2018,7 +2037,8 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         newImg.close()
         
         # Quantify wavelength calibration accuracy using sky
-        medianOffset, numLines=checkWavelengthCalibUsingSky(sky, refHeader)
+        medianOffset, numLines=checkWavelengthCalibUsingSky(sky, refWavelengths, featureMinPix = 5)
+        print "... stackAndExtract - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
         skyWavelengthCalibCheckList.append([extension, medianOffset, numLines])
         
         # Write 2d, sky subtracted combined spectrum
