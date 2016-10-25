@@ -983,13 +983,13 @@ def findScaleAndShift(arcRow, refModelDict, numScales = 101):
     corrMaxList=[]
     scalesArr=np.linspace(-0.1, 0.1, numScales)
     shiftsList=[]
-    overlapsList=[]
+    #overlapsList=[]
     for fftScale in scalesArr:
         tck=interpolate.splrep(data_x+fftScale*data_x, arcRowSegMap)
         arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
         corr, corrMax, fftShift=fftCorrelate(refModelSegMap, arcRow_scaled) 
-        overlap=minFunc_findShiftAndScale([fftShift, fftScale], arcRowSegMap, refModelSegMap, data_x)
-        overlapsList.append(overlap)
+        #overlap=minFunc_findShiftAndScale([fftShift, fftScale], arcRowSegMap, refModelSegMap, data_x)
+        #overlapsList.append(overlap)
         corrMaxList.append(corrMax)
         shiftsList.append(fftShift)
     index=corrMaxList.index(max(corrMaxList))
