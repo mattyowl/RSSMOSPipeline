@@ -19,14 +19,19 @@ the following grating/lamp/detector binning combinations:
 More can be added relatively easily (see the modelArcSpectra dir), but no documentation on 
 this yet.
 
-The quickest way to check the wavelength calibration is to inspect the ```skyCheck_SLIT*.png``` 
-files, found under ```reducedDir/OBJECT_MASKID/diagnostics/```. These plot the sky signal extracted from each science frame for each slit, with the reference wavelengths of prominent sky lines shown as vertical dashed lines for comparison. If these don't line up, then an additional (or revised) reference model is needed. 
+The quickest way to check the wavelength calibration is to inspect the ```arcTransformTest*.png``` and 
+```skyCheck_SLIT*.png``` files, found under ```reducedDir/OBJECT_MASKID/diagnostics/```. The former show the
+transformed arc spectrum compared to the reference model, while the latter plot the sky signal extracted from each science frame for each slit, with the reference wavelengths of prominent sky lines shown as vertical dashed lines for comparison. If these don't line up, then an additional (or revised) reference model is needed. 
 
-The size in Angstroms of any offset from prominent sky lines in each final stacked spectrum is logged in ```reducedDir/OBJECT_MASKID/diagnostics/skyWavelengthCalibCheck.csv```. As well as the median offset
+The size in Angstroms of any offset from prominent sky lines in each final stacked spectrum is logged in 
+```reducedDir/OBJECT_MASKID/diagnostics/skyWavelengthCalibCheck.csv```. As well as the median offset
 of identified sky lines with respect to their reference wavelengths, the results averaged across all
 slits are listed at the bottom of this file (look for "all slits median" and "all slits RMS"). This 
 test shows that wavelength calibration using the pg0900 Ne (2x2 binning) reference model is good to 
-~< 1 Angstrom. Other reference models have not been tested yet.
+< 1 Angstrom. Other reference models have not been tested extensively yet.
+
+The pipeline has not yet been optimised for speed. It currently (Oct 2016) takes 30 minutes to run a mask 
+with 28 slits using the iterative sky subtraction method on an Intel Core i5-3320M (2.60 GHz).
 
 ## Software needed
 
