@@ -37,21 +37,22 @@ checkSkyLines=[
                6300.304,
                6363.708,
                6863.955,
-               6923.220,
-               7276.405,
-               7316.282,
-               7340.885,
-               7750.640,
-               7794.112,
-               7821.503,
-               7913.708,
-               7993.332,
-               8344.602,
-               8399.170,
-               8430.174,
-               8761.314,
-               8767.912,
-               8778.333]
+               #6923.220,
+               #7276.405,
+               #7316.282,
+               #7340.885,
+               #7750.640,
+               #7794.112,
+               #7821.503,
+               #7913.708,
+               #7993.332,
+               #8344.602,
+               #8399.170,
+               #8430.174,
+               #8761.314,
+               #8767.912,
+               #8778.333
+               ]
 
 #-------------------------------------------------------------------------------------------------------------
 def trace(message, verbose = True, logFile = None):
@@ -152,7 +153,7 @@ def getImageInfo(rawDir):
             obsType=header['CCDTYPE']
             maskID=header['MASKID']
             if obsType == 'OBJECT':
-                maskName=header['OBJECT']+"_"+maskID
+                maskName=header['OBJECT'].replace('"', "")+"_"+maskID
                 infoDict[maskName]={}
                 infoDict[maskName][maskID]={}
                 infoDict[maskName]['maskID']=maskID             # Clunky, but convenient
@@ -1068,6 +1069,13 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     refModelDict, arcFeatureTable, arcSegMap=selectBestRefModel(modelFileNameList, arcData, 
                                                                 thresholdSigma = thresholdSigma)
 
+    # Check sizes match - sometimes they differ by a pixel, why is a bit of a mystery...
+    # It's safe to truncate at the right
+    maxLength=min(refModelDict['arc_centreRow'].shape[0], arcData.shape[1])
+    arcData=arcData[:, :maxLength]
+    arcSegMap=arcSegMap[:, :maxLength]
+    refModelDict['arc_centreRow']=refModelDict['arc_centreRow'][:maxLength]
+    
     # Continue with previous 2d wavelength calib method
     # This step is important, but not crucial (although when it does go wrong, it is spectacular)
     # This just affects which lines are cross-identified between the arc and the reference model
@@ -1142,7 +1150,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
         xs=np.zeros(arcData.shape[0])
         for i in range(len(ys)):
             objPositions=ndimage.center_of_mass(arcData[ys[i]], labels = arcSegMap, index = arcFeatureTable['id'])
-            xs[i]=objPositions[np.where(arcFeatureTable['id'] == row['id'])[0]][0]
+            xs[i]=float(objPositions[np.where(arcFeatureTable['id'] == row['id'])[0][0]][0])
         # Linear fit should allow us to work out shear - here, given y, we want x
         # We probably don't want all this info (ys, xs), but keep for now
         # We could use polynomial instead of linear (see below)
