@@ -29,7 +29,10 @@ REF_MODEL_DIR="modelArcSpectra"
 
 # For checking wavelength calibration accuracy
 # Useful plot: http://www.astro.keele.ac.uk/jkt/GrSpInstructions/skylines1.jpg
-checkSkyLines=[5577.0, 
+checkSkyLines=[
+               #4980.7,
+               #5461.0,
+               5577.0, 
                5893.0, 
                6300.304,
                6363.708,
@@ -934,7 +937,6 @@ def minFunc_findShift(shift, scale, arcRow, normRefModel, data_x):
     arcMean=np.mean(arcRow_scaled)
     arcStd=np.std(arcRow_scaled)
     
-
     # Old style: minimize what we call overlap below - this behaves well with optimize.minimize
     # (overlap vs scale is a function with a clear minimum)
     overlap=np.trapz(abs(normRefModel[:data_x.shape[0]]-(arcRow_scaled-arcMean)/arcStd))
@@ -947,6 +949,7 @@ def minFunc_findShiftAndScale(x, arcRow, normRefModel, data_x):
     
     """
     
+    #t0=time.time()
     shift=x[0]
     s=x[1]
     tck=interpolate.splrep((data_x+shift)+s*data_x, arcRow)
@@ -957,11 +960,13 @@ def minFunc_findShiftAndScale(x, arcRow, normRefModel, data_x):
     # Old style: minimize what we call overlap below - this behaves well with optimize.minimize
     # (overlap vs scale is a function with a clear minimum)
     overlap=np.trapz(abs(normRefModel[:data_x.shape[0]]-(arcRow_scaled-arcMean)/arcStd))
-        
+    #t1=time.time()
+    #print "minFunc_findShiftAndScale took %.3f sec" % (t1-t0)
+
     return overlap
 
 #-------------------------------------------------------------------------------------------------------------
-def findScaleAndShift(arcRow, refModelDict, numScales = 101, quick = False):
+def findScaleAndShift(arcRow, refModelDict, numScales = 101):
     """Find best fit stretch and scale to transform arcRow to reference model.
     
     Returns maxmimum of cross correlation, and corresponding best fit scale and shift
@@ -969,51 +974,149 @@ def findScaleAndShift(arcRow, refModelDict, numScales = 101, quick = False):
     """
     
     #---
-    # Brute force cross correlation to get shift and scale, but this only takes 1.6 sec for 100 scales
-    # It turns out that the huge line at 6965.43 Angstroms in the Ar lamp can throw off cross correlation
-    # So, we divide by a moving average first to level things out somewhat
-    smoothScaled_refModelArc=refModelDict['arc_centreRow']/ndimage.uniform_filter1d(refModelDict['arc_centreRow'], 40)
-    smoothScaled_arcRow=arcRow/ndimage.uniform_filter1d(arcRow, 40)
-    modelStd=np.std(smoothScaled_refModelArc)
-    modelMean=np.mean(smoothScaled_refModelArc)
-    normRefModel=(smoothScaled_refModelArc-modelMean)/modelStd
-    data_x=np.arange(0, smoothScaled_arcRow.shape[0])        
-    t0=time.time()
+    # And another...
+    tab, arcRowSegMap=detectLines(arcRow)
+    arcRowSegMap[np.greater(arcRowSegMap, 0)]=1.
+    tab, refModelSegMap=detectLines(refModelDict['arc_centreRow'])
+    refModelSegMap[np.greater(refModelSegMap, 0)]=1.
+    
+    # fftCorrelate
+    data_x=np.arange(0, arcRowSegMap.shape[0])  
     corrMaxList=[]
     scalesArr=np.linspace(-0.1, 0.1, numScales)
     shiftsList=[]
-    for s in scalesArr:
-        tck=interpolate.splrep(data_x+s*data_x, arcRow)
+    overlapsList=[]
+    for fftScale in scalesArr:
+        tck=interpolate.splrep(data_x+fftScale*data_x, arcRowSegMap)
         arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
-        arcMean=np.mean(arcRow_scaled)
-        arcStd=np.std(arcRow_scaled)
-        corr, corrMax, shift=fftCorrelate(normRefModel, (arcRow_scaled-arcMean)/arcStd) 
+        corr, corrMax, fftShift=fftCorrelate(refModelSegMap, arcRow_scaled) 
+        overlap=minFunc_findShiftAndScale([fftShift, fftScale], arcRowSegMap, refModelSegMap, data_x)
+        overlapsList.append(overlap)
         corrMaxList.append(corrMax)
-        shiftsList.append(shift)
-    t1=time.time()
-    #print t1-t0
-    
+        shiftsList.append(fftShift)
     index=corrMaxList.index(max(corrMaxList))
     shift=shiftsList[index]
     corrMax=corrMaxList[index]
     s=scalesArr[index]
-    
-    # Optional final touch up with differential_evolution
-    if quick == False:
-        t0=time.time()
-        result=optimize.differential_evolution(minFunc_findShiftAndScale, [[shift-20, shift+20], [s-0.03, s+0.03]], 
-                                            args = (smoothScaled_arcRow, normRefModel, data_x), popsize = 50)
-        t1=time.time()
-        print "... %.3f sec for differential_evolution ..." % (t1-t0)
-        if result['success'] == False:
-            raise Exception, "differential_evolution failed"
-        shift=result['x'][0]
-        s=result['x'][1]
+    #minOverlap=overlapsList[index]
+    #corrMax=1./minOverlap
+    print "... using fftCorrelate shift = %.3f, scale = %.3f ..." % (shift, s)
+
+    #---
+    # Yet another method... because fftCorrelate can go badly wrong, and diff_evo is stochastic
+    #smoothScaled_refModelArc=refModelDict['arc_centreRow']/ndimage.uniform_filter1d(refModelDict['arc_centreRow'], 40)
+    #smoothScaled_arcRow=arcRow/ndimage.uniform_filter1d(arcRow, 40)
+    #modelStd=np.std(smoothScaled_refModelArc)
+    #modelMean=np.mean(smoothScaled_refModelArc)
+    #normRefModel=(smoothScaled_refModelArc-modelMean)/modelStd
+    #data_x=np.arange(0, smoothScaled_arcRow.shape[0])  
+    #t0=time.time()
+    #searchBox=3000/2.
+    #scaleBox=0.2/2.
+    #result, minOverlap, parGrid, overlapGrid=optimize.brute(minFunc_findShiftAndScale, 
+                                            #[[-searchBox, searchBox], [-scaleBox, scaleBox]], 
+                                            #args = (smoothScaled_arcRow, normRefModel, data_x), 
+                                            #Ns = Ns, full_output = True)
+    #shift=result[0]
+    #s=result[1]
+    #corrMax=1./minOverlap
+    #print "... first pass shift = %.3f, scale = %.3f ..." % (shift, s)
+    ## Also run fftCorrelate (it can't hurt, but doesn't always help) - if minOverlap is better, go with it
+    #corrMaxList=[]
+    #scalesArr=np.linspace(-0.1, 0.1, numScales)
+    #shiftsList=[]
+    #overlapsList=[]
+    #for fftScale in scalesArr:
+        #tck=interpolate.splrep(data_x+fftScale*data_x, arcRow)
+        #arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
+        #arcMean=np.mean(arcRow_scaled)
+        #arcStd=np.std(arcRow_scaled)
+        #corr, corrMax, fftShift=fftCorrelate(normRefModel, (arcRow_scaled-arcMean)/arcStd) 
+        #overlap=minFunc_findShiftAndScale([fftShift, fftScale], smoothScaled_arcRow, normRefModel, data_x)
+        #overlapsList.append(overlap)
+        #corrMaxList.append(corrMax)
+        #shiftsList.append(fftShift)
+    #index=corrMaxList.index(max(corrMaxList))
+    #if overlapsList[index] < minOverlap and abs(shiftsList[index]) < searchBox:
+        #shift=shiftsList[index]
+        ##corrMax=corrMaxList[index]
+        #s=scalesArr[index]
+        #minOverlap=overlapsList[index]
+        #corrMax=1./minOverlap
+        #print "... using fftCorrelate shift = %.3f, scale = %.3f ..." % (shift, s)
+    ##---
+    #if quick == False:
+        #refinedMinOverlap=minOverlap*10
+        #count=0
+        #maxRefinementIterations=20
+        #result, refinedMinOverlap, parGrid, overlapGrid=optimize.brute(minFunc_findShiftAndScale, 
+                                    #[[shift-50, shift+50], [s-0.01, s+0.01]], 
+                                    #args = (smoothScaled_arcRow, normRefModel, data_x), 
+                                    #Ns = Ns*2, full_output = True)
+        #t1=time.time()
+        #if refinedMinOverlap < minOverlap:
+            #shift=result[0]
+            #s=result[1]
+            #minOverlap=refinedMinOverlap
+            #print "... using refined brute force estimate ..."
+            #minOverlap=refinedMinOverlap
+        #else:
+            #print "... no improvement with refined brute force estimate ..."
+        #t1=time.time()
+        #print "... brute force took %.3f sec ..." % (t1-t0)
+        
+        # ^^^ Above here 25/10/2016
+        
+        #---
+        #IPython.embed()
+        #sys.exit()
+        #plt.matplotlib.interactive(True)
+        #arc_centreRow=arcRow
+        #bestFitScale=result[1]
+        #bestFitShift=result[0]
+        #data_x=np.arange(0, arc_centreRow.shape[0])        
+        #x=np.arange(0, len(arc_centreRow))
+        #arc_x_shifted=x*(1+bestFitScale)+bestFitShift
+        ##plt.figure(figsize = (15, 10))
+        #plt.plot(x, refModelDict['arc_centreRow'][:data_x.shape[0]]/refModelDict['arc_centreRow'][:data_x.shape[0]].mean(), 'b-', label ='ref model')
+        #plt.plot(arc_x_shifted, arc_centreRow/arc_centreRow.mean(), 'r-', label = 'transformed arc')
+        #plt.title("shift = %.3f, scale = %.3f" % (bestFitShift, bestFitScale))
+        #plt.semilogy()
+        #plt.legend()
+        #while refinedMinOverlap > minOverlap:
+            #count=count+1
+            #searchBox=searchBox/2#*0.8
+            #scaleBox=scaleBox/2#*0.8
+            ## Avoid diff evolution - it is too unpredictable
+            ##result=optimize.differential_evolution(minFunc_findShiftAndScale, 
+                                                   ##[[shift-searchBox, shift+searchBox], 
+                                                    ##[s-scaleBox, s+scaleBox]], 
+                                                   ##args = (smoothScaled_arcRow, normRefModel, data_x), 
+                                                   ##popsize = 10)#, polish = False)
+            ##refinedMinOverlap=result.fun
+            #result, refinedMinOverlap, parGrid, overlapGrid=optimize.brute(minFunc_findShiftAndScale, 
+                                                #[[shift-searchBox, shift+searchBox], [s-scaleBox, s+scaleBox]], 
+                                                #args = (smoothScaled_arcRow, normRefModel, data_x), 
+                                                #Ns = 100, full_output = True)
+            #print "... refined brute force shift = %.3f, scale = %.3f ..." % (result[0], result[1])
+            #print refinedMinOverlap, minOverlap
+            #if count > maxRefinementIterations:
+                #print "... terminated refinement after maximum %d iterations ..." % (maxRefinementIterations)
+                #break
+        #if refinedMinOverlap < minOverlap:
+            #shift=result[0]
+            #s=result[1]
+            #print shift, s, minOverlap, searchBox
+            #print "... using refined brute force estimate ..."
+            #minOverlap=refinedMinOverlap
+        #t1=time.time()
+        #print "... brute force took %.3f sec ..." % (t1-t0)
     
     #---
-    # A fast brute force method... but it's stochastic, so we have to be careful...
+    # Brute force cross correlation to get shift and scale, but this only takes 1.6 sec for 100 scales
     # It turns out that the huge line at 6965.43 Angstroms in the Ar lamp can throw off cross correlation
     # So, we divide by a moving average first to level things out somewhat
+    #if method == 'fftCorrelate':
     #smoothScaled_refModelArc=refModelDict['arc_centreRow']/ndimage.uniform_filter1d(refModelDict['arc_centreRow'], 40)
     #smoothScaled_arcRow=arcRow/ndimage.uniform_filter1d(arcRow, 40)
     #modelStd=np.std(smoothScaled_refModelArc)
@@ -1021,23 +1124,74 @@ def findScaleAndShift(arcRow, refModelDict, numScales = 101, quick = False):
     #normRefModel=(smoothScaled_refModelArc-modelMean)/modelStd
     #data_x=np.arange(0, smoothScaled_arcRow.shape[0])        
     #t0=time.time()
-    #result=optimize.differential_evolution(minFunc_findShiftAndScale, [[-1500, 1500], [-0.1, 0.1]], 
-                          #args = (smoothScaled_arcRow, normRefModel, data_x), popsize = 100)
+    #corrMaxList=[]
+    #scalesArr=np.linspace(-0.1, 0.1, numScales)
+    #shiftsList=[]
+    #overlapsList=[]
+    #for s in scalesArr:
+        #tck=interpolate.splrep(data_x+s*data_x, arcRow)
+        #arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
+        #arcMean=np.mean(arcRow_scaled)
+        #arcStd=np.std(arcRow_scaled)
+        #corr, corrMax, shift=fftCorrelate(normRefModel, (arcRow_scaled-arcMean)/arcStd) 
+        #overlap=minFunc_findShiftAndScale([shift, s], smoothScaled_arcRow, normRefModel, data_x)
+        #overlapsList.append(overlap)
+        #corrMaxList.append(corrMax)
+        #shiftsList.append(shift)
     #t1=time.time()
-    #print "... %.3f sec for differential_evolution ..." % (t1-t0)
-    #if result['success'] == False:
-        #raise Exception, "differential_evolution failed"
-    #shift=result['x'][0]
-    #s=result['x'][1]
+    ##print t1-t0
+    
+    #index=corrMaxList.index(max(corrMaxList))
+    #shift=shiftsList[index]
+    #corrMax=corrMaxList[index]
+    #s=scalesArr[index]
+    
+    # Optional final touch up with differential_evolution
+    #if quick == False:
+        #t0=time.time()
+        #result=optimize.differential_evolution(minFunc_findShiftAndScale, 
+                                                #[[-1500, 1500], [-0.1, 0.1]], 
+                                                #args = (smoothScaled_arcRow, normRefModel, data_x), 
+                                                #popsize = 10, maxiter = 100)
+        #t1=time.time()
+        #print "... %.3f sec for differential_evolution ..." % (t1-t0)
+        #if result['success'] == False:
+            #raise Exception, "differential_evolution failed"
+        #shift=result['x'][0]
+        #s=result['x'][1]
+    
+    #---
+    # A fast brute force method... but it's stochastic, so we have to be careful...
+    # It turns out that the huge line at 6965.43 Angstroms in the Ar lamp can throw off cross correlation
+    # So, we divide by a moving average first to level things out somewhat
+    #elif method == 'diffEvo':
+        #smoothScaled_refModelArc=refModelDict['arc_centreRow']/ndimage.uniform_filter1d(refModelDict['arc_centreRow'], 40)
+        #smoothScaled_arcRow=arcRow/ndimage.uniform_filter1d(arcRow, 40)
+        #modelStd=np.std(smoothScaled_refModelArc)
+        #modelMean=np.mean(smoothScaled_refModelArc)
+        #normRefModel=(smoothScaled_refModelArc-modelMean)/modelStd
+        #data_x=np.arange(0, smoothScaled_arcRow.shape[0])        
+        #t0=time.time()
+        #result=optimize.differential_evolution(minFunc_findShiftAndScale, [[-1500, 1500], [-0.1, 0.1]], 
+                            #args = (smoothScaled_arcRow, normRefModel, data_x), popsize = 100)
+        #t1=time.time()
+        #print "... %.3f sec for differential_evolution ..." % (t1-t0)
+        #if result['success'] == False:
+            #raise Exception, "differential_evolution failed"
+        #shift=result['x'][0]
+        #s=result['x'][1]
 
-    ## We only need this bit for selecting the best arc based on corrMax
-    #tck=interpolate.splrep((data_x+shift)+s*data_x, smoothScaled_arcRow)
-    #arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
-    #arcMean=np.mean(arcRow_scaled)
-    #arcStd=np.std(arcRow_scaled)
-    #normArcRow_scaled=(arcRow_scaled-arcMean)/arcStd
-    #corr, corrMax, extraShift=fftCorrelate(normRefModel, normArcRow_scaled)    
+        ## We only need this bit for selecting the best arc based on corrMax
+        #tck=interpolate.splrep((data_x+shift)+s*data_x, smoothScaled_arcRow)
+        #arcRow_scaled=interpolate.splev(data_x, tck, ext = 1)
+        #arcMean=np.mean(arcRow_scaled)
+        #arcStd=np.std(arcRow_scaled)
+        #normArcRow_scaled=(arcRow_scaled-arcMean)/arcStd
+        #corr, corrMax, extraShift=fftCorrelate(normRefModel, normArcRow_scaled)    
    
+    #else:
+        #raise Exception, "method '%s' not found" % (method)
+    
     return corrMax, s, shift
   
 #-------------------------------------------------------------------------------------------------------------
@@ -1070,7 +1224,7 @@ def selectBestRefModel(modelFileNameList, arcData, thresholdSigma = 2.0):
         # Replaced np.correlate with fft based correlation
         # Find shift and wavelength dependent scale change (stretch, then shift)
         arcRow=arcData[arcData.shape[0]/2]
-        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = True)
+        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, numScales = 11)
         bestCorrMaxList.append(bestCorrMax)
         bestFitScaleList.append(bestFitScale)
         bestFitShiftList.append(bestFitShift)
@@ -1111,7 +1265,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # This just affects which lines are cross-identified between the arc and the reference model
     yIndex=arcData.shape[0]/2
     arcRow=arcData[yIndex]
-    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, quick = True)
+    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, numScales = 201)
     arc_centreRow=arcRow
     
     # Sanity check plot
@@ -1127,44 +1281,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     plt.legend()
     plt.savefig(diagnosticsDir+os.path.sep+"arcTransformTest_"+diagnosticsLabel+".png")
     plt.close()    
-    #IPython.embed()
-    #sys.exit()
     
-    # New - based on J0018 skyCheck.pngs, the old method is better...
-    ## Calibration from the reference model
-    ## Then use bestFitScale, bestFitShift to transform
-    ##plt.matplotlib.interactive(True)
-    #transformed_model_x=(refModelDict['featureTable']['x_centreRow']-bestFitShift)/(1+bestFitScale)
-    #fitCoeffs=np.polyfit(transformed_model_x, refModelDict['featureTable']['wavelength'], order)
-    #wavelengthCalibPoly=np.poly1d(fitCoeffs)
-    #wavelengths=wavelengthCalibPoly(transformed_model_x)
-    #plt.plot(transformed_model_x, refModelDict['featureTable']['wavelength'], 'r.')
-    #plt.plot(transformed_model_x, wavelengths, 'b-')
-    #plt.xlabel("Transformed x (pix)")
-    #plt.ylabel("Wavelength (Angstroms)")
-    #plt.savefig(diagnosticsDir+os.path.sep+"transformedFeaturesFit_"+diagnosticsLabel+".png")
-    #plt.close()
-
-    ## Heck, let's just get best fit shifts over the slit
-    ## Fix the scale to that found for centreRow
-    #shifts=[]
-    #data_x=np.arange(0, arcRow.shape[0])        
-    #modelStd=np.std(refModelDict['arc_centreRow'])
-    #modelMean=np.mean(refModelDict['arc_centreRow'])
-    #normRefModel=(refModelDict['arc_centreRow']-modelMean)/modelStd
-    #fitCoeffsArr=[]
-    #for y in range(arcData.shape[0]):
-        #t0=time.time()
-        #result=optimize.minimize_scalar(minFunc_findShift, bounds = (bestFitShift-50, bestFitShift+50), 
-                                        #method = 'Bounded', args = (bestFitScale, arcData[y], 
-                                                                    #normRefModel, data_x))
-        #shift=result['x']
-        #transformed_model_x=(refModelDict['featureTable']['x_centreRow']-shift)/(1+bestFitScale)
-        #fitCoeffs=np.polyfit(transformed_model_x, refModelDict['featureTable']['wavelength'], order)
-        #fitCoeffsArr.append(fitCoeffs)
-    #fitCoeffsArr=np.array(fitCoeffsArr)
-        
-    # Old ---    
     # Tag features by transforming model coords to arc coords and looking for closest match
     # Looking at above sanity plot, seems like the weak link here is centroiding done for 
     # x_centreRow in arcFeatureTable?
@@ -1956,6 +2073,11 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         # Wavelength calib diagnostic: does the sky line up from each science frame?
         fluxMax=0
         for sky, wavelengths, header in zip(skyList, wavelengthsList, headersList):
+            if np.sum(sky) == 0:
+                print "zero sky?"
+                IPython.embed()
+                sys.exit()
+                
             flux=sky/np.median(sky)
             if flux.max() > fluxMax:
                 fluxMax=flux.max()
