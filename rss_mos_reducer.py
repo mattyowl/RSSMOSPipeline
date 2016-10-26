@@ -2212,7 +2212,9 @@ if __name__ == '__main__':
     infoDict=getImageInfo(rawDir)
     
     if maskName == 'list':
-        print "Masks found: %s" % (str(infoDict.keys()))
+        maskList=infoDict.keys()
+        maskList.sort()
+        print "Masks found: %s" % (str(maskList))
         sys.exit()
     elif maskName != 'all':
         shortDict={}
