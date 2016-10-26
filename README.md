@@ -30,8 +30,9 @@ slits are listed at the bottom of this file (look for "all slits median" and "al
 test shows that wavelength calibration using the pg0900 Ne (2x2 binning) reference model is good to 
 < 1 Angstrom. Other reference models have not been tested extensively yet.
 
-The pipeline has not yet been optimised for speed. It currently (Oct 2016) takes 30 minutes to run a mask 
-with 28 slits using the iterative sky subtraction method on an Intel Core i5-3320M (2.60 GHz).
+The pipeline has not yet been optimised for speed. On an Intel Core i5-3320M (2.60 GHz), it currently 
+(Oct 2016) takes 30 minutes to run a mask with 28 slits using the iterative sky subtraction method,
+or 12 minutes with the non-iterative sky subtraction method.
 
 ## Software needed
 

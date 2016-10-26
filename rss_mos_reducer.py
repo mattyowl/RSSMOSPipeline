@@ -852,11 +852,17 @@ def detectLines(data, sigmaCut = 3.0, thresholdSigma = 2.0, featureMinPix = 30):
     objIDs=np.unique(segmentationMap)
     objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
     if data.ndim == 2:
-        objPositions_centreRow=ndimage.center_of_mass(data[data.shape[0]/2], labels = segmentationMap, index = objIDs)
+        #objPositions_centreRow=ndimage.center_of_mass(data[data.shape[0]/2], labels = segmentationMap, index = objIDs)
+        objPositions_centreRow=ndimage.maximum_position(data[data.shape[0]/2], labels = segmentationMap[data.shape[0]/2], index = objIDs)
+        objAmplitudes_centreRow=ndimage.maximum(data[data.shape[0]/2], labels = segmentationMap[data.shape[0]/2], index = objIDs)
     elif data.ndim == 1:
-        objPositions_centreRow=ndimage.center_of_mass(data, labels = segmentationMap, index = objIDs)
-        
+        # ndmage.centre_of_mass can be led astray... just use local maximum
+        #objPositions_centreRow=ndimage.center_of_mass(data, labels = segmentationMap, index = objIDs)
+        objPositions_centreRow=ndimage.maximum_position(data, labels = segmentationMap, index = objIDs)
+        objAmplitudes_centreRow=ndimage.maximum(data, labels = segmentationMap, index = objIDs)
+
     objPositions_centreRow=np.array(objPositions_centreRow).flatten()
+    objAmplitudes_centreRow=np.array(objAmplitudes_centreRow).flatten()
     minPixMask=np.greater(objNumPix, featureMinPix)
     featureTable=atpy.Table()
     featureTable.add_column('id', objIDs[minPixMask])
@@ -865,7 +871,7 @@ def detectLines(data, sigmaCut = 3.0, thresholdSigma = 2.0, featureMinPix = 30):
         featureTable.add_column('y_centreRow', [data.shape[0]/2]*len(featureTable))
         featureTable.add_column('amplitude', data[data.shape[0]/2, np.array(np.round(featureTable['x_centreRow']), dtype = int)])
     elif data.ndim == 1:
-        featureTable.add_column('amplitude', data[np.array(np.round(featureTable['x_centreRow']), dtype = int)])
+        featureTable.add_column('amplitude', objAmplitudes_centreRow[minPixMask])
 
     return featureTable, segmentationMap
 
