@@ -172,6 +172,7 @@ if __name__ == '__main__':
     refModelDict={'featureTable': featureTable, 'arc_centreRow': data_centreRow}
 
     # Test refitted model...
+    print "Inspect plot windows - close all when done. You will then be asked if you want to update %s." % (modelFileName) 
     arcData=refModelDict['arc_centreRow']
     xs=refModelDict['featureTable']['x_centreRow']
     wavelengths=refModelDict['featureTable']['wavelength']

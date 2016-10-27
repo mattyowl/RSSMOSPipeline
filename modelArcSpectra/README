@@ -1,0 +1,9 @@
+Instructions on how to use this (if not obvious from the code and 
+help messages there) will be added later.
+
+Note that the line centering used in createModelArcSpectrum.py
+needs to be updated to match fixRefModel.py (as of 27 Oct 2016).
+
+For now, could use createModelArcSpectrum.py and then run 
+fixRefModel.py on the output (will fix next time a new 
+reference model is added).
