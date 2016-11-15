@@ -677,6 +677,27 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------
+def makeChipGapMask(data):
+    """Given an image array (data), find and mask the chip gaps.
+    
+    Returns a mask where 1 = chip gap, 0 otherwise.
+    
+    """
+    
+    lowMaskValue=2.0
+    minPix=1000
+    chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
+    segmentationMap, numObjects=ndimage.label(chipGapMask)
+    sigPixMask=np.equal(chipGapMask, 1)
+    objIDs=np.unique(segmentationMap)
+    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+    for objID, nPix in zip(objIDs, objNumPix):    
+        if nPix < minPix:
+            chipGapMask[np.equal(segmentationMap, objID)]=0.0
+    
+    return chipGapMask
+
+#-------------------------------------------------------------------------------------------------------------
 def applyFlatField(maskDict, outDir):
     """Applies the flat field correction. Let's do this in place...
     
@@ -698,45 +719,38 @@ def applyFlatField(maskDict, outDir):
             data=img[extension].data
             flatfield=flatImg[extension].data
             med=np.median(flatfield, axis = 0)
-            
-            # Find chip gaps
-            threshold=200
-            grad=np.gradient(med)
-            plusMask=np.greater(grad, threshold)
-            minusMask=np.less(grad, -1*threshold) 
-            gapsDict={}
-            lookingFor=0
-            xMin=None
-            xMax=None
-            gapsCount=0
-            for i in range(len(plusMask)):
-                if lookingFor == 1:
-                    if plusMask[i] == True:
-                        xMax=i
-                        lookingFor=0
-                if lookingFor == 0:
-                    if minusMask[i] == True:
-                        xMin=i
-                        lookingFor=1
-                if xMin != None and xMax != None:
-                    gapsCount=gapsCount+1
-                    gapsDict[gapsCount]={'xMin': xMin-1, 'xMax': xMax+1}    
-                    xMin=None
-                    xMax=None
-            gapsMask=np.ones(len(med), dtype = bool)
-            for key in gapsDict.keys():
-                gapsMask[gapsDict[key]['xMin']:gapsDict[key]['xMax']]=False
+                        
+            # Find the chip gaps and make a mask
+            chipGapMask=makeChipGapMask(data)
+            # Invert it as we want weights
+            gapsMask=np.equal(np.median(chipGapMask, axis = 0), False)
             
             # Fit and remove spectrum of flat lamp
-            x=np.arange(len(med))
-            poly=np.poly1d(np.polyfit(x[gapsMask], med[gapsMask], 10))
-            mod=np.array([poly(x)]*data.shape[0])
-            flatfield=flatfield/mod
-            
+            # Polynomial fit
+            #x=np.arange(len(med))
+            #poly=np.poly1d(np.polyfit(x[gapsMask], med[gapsMask], 40)) # was 10
+            #mod=np.array([poly(x)]*data.shape[0])
+            #flatfield=flatfield/mod
+            #plt.matplotlib.interactive(True)
             #plt.plot(x, med)
             #plt.plot(x, poly(x))
-            #IPython.embed()
-            #sys.exit()
+            
+            # Spline fit
+            x=np.arange(len(med))
+            numKnots=40
+            spacing=x.max()/numKnots
+            w=gapsMask
+            t=np.linspace(spacing, x.max()-spacing, numKnots-2)
+            tck=interpolate.splrep(x, med, w = w, t = t, s = 2)
+            if np.any(np.isnan(tck[1])) == True:
+                print "spline problem"
+                IPython.embed()
+                sys.exit()
+            mod=np.array([interpolate.splev(x, tck)]*data.shape[0])
+            flatfield=flatfield/mod
+            #plt.matplotlib.interactive(True)
+            #plt.plot(x, med)
+            #plt.plot(x, interpolate.splev(x, tck), 'r-')
             
             zeroMask=np.equal(flatfield, 0)
             nonZeroMask=np.not_equal(flatfield, 0)
@@ -1446,7 +1460,7 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     
 #-------------------------------------------------------------------------------------------------------------
 def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runningProfile = None,
-                                iterateProfile = False):
+                                iterateProfile = False, throwAwayRows = 2):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This is somewhat similar to the Horne optimal extraction algorithm. We solve:
 
@@ -1477,20 +1491,11 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
     print "... extracting spectrum ..."
     
     # Throw away rows at edges as these often contain noise
-    #throwAwayRows=2
-    #data=data[throwAwayRows:-throwAwayRows]
+    if throwAwayRows > 0:
+        data=data[throwAwayRows:-throwAwayRows]
     
     # Find the chip gaps and make a mask
-    lowMaskValue=2.0
-    minPix=1000
-    chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
-    segmentationMap, numObjects=ndimage.label(chipGapMask)
-    sigPixMask=np.equal(chipGapMask, 1)
-    objIDs=np.unique(segmentationMap)
-    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
-    for objID, nPix in zip(objIDs, objNumPix):    
-        if nPix < minPix:
-            chipGapMask[np.equal(segmentationMap, objID)]=0.0
+    chipGapMask=makeChipGapMask(data)
 
     # First measurement of the profile of the object
     if np.any(runningProfile) == None:
@@ -1504,6 +1509,10 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
     tolerance=1e-5
     k=0
     skyTotal=np.zeros(data.shape[1]) # we need to add to this each iteration
+    
+    # For ignoring junk at the edges
+    skyMask2d=identifySky(data)
+
     while diff > tolerance or k > maxIterations:
         t0=time.time()
         xArr=[]
@@ -1530,6 +1539,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
             skyMask=maskNoisyData(b)
             skyMask=np.equal(skyMask, False)
             A[1]=np.array(skyMask, dtype = int)#1.#(1.-prof) 
+            #A[1]=skyMask2d[:, i]
             # CR masking
             wn=wn2d[:, i]
             for j in range(b.shape[0]):
@@ -1559,6 +1569,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
         sigmaCut=3.0
         mean=0
         sigma=1e6
+        lowMaskValue=2.0
         for i in range(20):
             gtrZeroMask=np.greater(arr, lowMaskValue)
             mask=np.less(abs(arr-mean), sigmaCut*sigma)
@@ -1604,7 +1615,8 @@ def identifySky(data):
     return skyMask2d
 
 #-------------------------------------------------------------------------------------------------------------
-def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0):
+def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0,
+                       throwAwayRows = 2):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This was (supposed) to be similar to the Horne optimal extraction. We solve:
 
@@ -1635,20 +1647,11 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
     """
 
     # Throw away rows at edges as these often contain noise
-    #throwAwayRows=2
-    #data=data[throwAwayRows:-throwAwayRows]
+    if throwAwayRows > 0:
+        data=data[throwAwayRows:-throwAwayRows]
     
     # Find the chip gaps and make a mask
-    lowMaskValue=2.0
-    minPix=1000
-    chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
-    segmentationMap, numObjects=ndimage.label(chipGapMask)
-    sigPixMask=np.equal(chipGapMask, 1)
-    objIDs=np.unique(segmentationMap)
-    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
-    for objID, nPix in zip(objIDs, objNumPix):    
-        if nPix < minPix:
-            chipGapMask[np.equal(segmentationMap, objID)]=0.0
+    chipGapMask=makeChipGapMask(data)
 
     # All of the below is really just CR rejection now...
     # Assume one object per slit and a fixed width
@@ -1720,6 +1723,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
         sigmaCut=3.0
         mean=0
         sigma=1e6
+        lowMaskValue=2.
         for i in range(20):
             lastSigma=sigma
             gtrZeroMask=np.greater(arr, lowMaskValue)
@@ -1968,7 +1972,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         medianOffset, numLines=checkWavelengthCalibUsingSky(sky, regrid_wavelengths, featureMinPix = 5)
         print "... extractAndStack - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
         outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        write1DSpectrum(signal, sky, regrid_wavelengths, outFileName)
+        write1DSpectrum(signal, sky, regrid_wavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
         
         # 2d combined/extracted, projecting CR-masked arrays to same wavelength grid
         # NOTE: These all have different wavelength calibrations stored in wavelengthsList
@@ -1997,15 +2001,23 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         if iterativeMethod == True:
             signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
         else:
-            signal, sky, mData=weightedExtraction(med)
+            signal, sky, mData=weightedExtraction(med)       
+        # Put chipGapMask into 1d spectra
+        chipGapMask=np.median(makeChipGapMask(med), axis = 0)
+        outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'],
+                        mask = chipGapMask)
+        
         # Experimenting with a method that will handle running profile
         #t0=time.time()
         #signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
         #t1=time.time()
         #print "... final extraction (took %.3f sec) ..." % (t1-t0)
-        
-        outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        write1DSpectrum(signal, sky, refWavelengths, outFileName)
+        #outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_testFinal.fits"
+        #write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])        
+        #print "final extract again"
+        #IPython.embed()
+        #sys.exit()
         
         # Write 2d combined spectrum
         outFileName=stackExtractSpecDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
@@ -2122,6 +2134,10 @@ def finalExtraction(data, subFrac = 0.8):
     
     """
 
+    # Throw away rows at edges as these often contain noise
+    #throwAwayRows=2
+    #data=data[throwAwayRows:-throwAwayRows]
+    
     # Find the chip gaps and make a mask
     lowMaskValue=2.0
     minPix=1000
@@ -2165,7 +2181,7 @@ def finalExtraction(data, subFrac = 0.8):
 
     # New ---
     # Iterative sky subtraction, with the object trace we found
-    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf, iterateProfile = False)
+    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf, iterateProfile = False, throwAwayRows = 0)
 
     # Make 2d sky-subtracted spectrum
     sky2d=np.array([sky]*data.shape[0])
@@ -2207,7 +2223,7 @@ def finalExtraction(data, subFrac = 0.8):
     return signal, sky, skySubbed2d
 
 #-------------------------------------------------------------------------------------------------------------
-def write1DSpectrum(signal, sky, wavelength, outFileName):
+def write1DSpectrum(signal, sky, wavelength, outFileName, maskRA, maskDec, mask = None):
     """Writes 1D spectrum to .fits table file.
     
     """
@@ -2215,11 +2231,15 @@ def write1DSpectrum(signal, sky, wavelength, outFileName):
     specColumn=pyfits.Column(name='SPEC', format='D', array=signal)
     skyColumn=pyfits.Column(name='SKYSPEC', format='D', array=sky)
     lambdaColumn=pyfits.Column(name='LAMBDA', format='D', array=wavelength)
-    tabHDU=pyfits.BinTableHDU.from_columns([specColumn, skyColumn, lambdaColumn])
+    cols=[specColumn, skyColumn, lambdaColumn]
+    if np.any(mask) != None:
+        maskColumn=pyfits.Column(name='MASK', format='D', array=mask)
+        cols.append(maskColumn)
+    tabHDU=pyfits.BinTableHDU.from_columns(cols)
     tabHDU.name='1D_SPECTRUM'
     HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
-    HDUList[0].header['MASKRA']=maskDict['RA']
-    HDUList[0].header['MASKDEC']=maskDict['DEC']
+    HDUList[0].header['MASKRA']=maskRA
+    HDUList[0].header['MASKDEC']=maskDec
     if os.path.exists(outFileName) == True:
         os.remove(outFileName)
     HDUList.writeto(outFileName, clobber=True)   

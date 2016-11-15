@@ -99,8 +99,8 @@ symlinks to the ```rss_mos_reducer.py``` script and ```modelArcSpectra``` direct
     and ```-i```, which switches on the iterative sky subtraction method for the spectral extraction.
     This currently seems to work better than the default extraction method, but is slower.
 
-4.  After the pipeline has finished, you will find data at various stages of reduction under the
-    ```reducedData``` dir (```reduced``` for the above example). At the moment, this is not cleaned up.
+4.  After the pipeline has finished, you will find data at various stages of reduction under the ```reducedData``` 
+    dir (```reduced``` for the above example). At the moment, this is not cleaned up.
 
     Two methods are used for extracting spectra:
     
@@ -140,7 +140,6 @@ for MOS data. This might need some tweaking to allow the user to set detection t
 case, more command-line switches for this will be added).
 
 ## Things which can/should be improved/added
-* flat fielding (polynomial fit probably not optimal)
 * extraction (not optimal at the moment)
 * spectrophotometric calibration using a standard (not implemented)
 
