@@ -1162,8 +1162,8 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
         row['intercept']=intercept
 
     # Wavelength calibration and model with arbitrary order polynomials - get coeffs for each row
-    # We could potentially fit these coeffs as fn. of y - they are all well behaved
-    # This array should be all we need to wavelength calibrate + rectify
+    # Now iterating, because can blow up if point on edge is way off
+    # On each iteration, we mask the highest residual above a threshold of delta wavelength > 100 Angstroms
     wavelengths=arcFeatureTable['wavelength']
     fitCoeffsArr=[]
     for y in range(arcData.shape[0]):
@@ -1171,14 +1171,21 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
         for row in arcFeatureTable:
             xs.append(row['slope']*y + row['intercept'])
         xs=np.array(xs)
-        try:
-            fitCoeffsArr.append(np.polyfit(xs, wavelengths, order))
-        except:
-            print "polyfit failed"
-            IPython.embed()
-            sys.exit()
+        mask=np.array([True]*len(xs))
+        removedPoint=True
+        while removedPoint == True:
+            coeffs=np.polyfit(xs[mask], wavelengths[mask], order)
+            testPoly=np.poly1d(coeffs)
+            testWavelengths=testPoly(xs)
+            res=abs(wavelengths-testWavelengths)
+            if res[mask].max() > 100.:
+                removedPoint=True
+                mask[np.equal(res, res[mask].max())]=False
+            else:
+                removedPoint=False
+        fitCoeffsArr.append(coeffs)
     fitCoeffsArr=np.array(fitCoeffsArr)
-
+    
     # Check of wavelength calibration fit
     wavelengthCalibPoly=np.poly1d(fitCoeffsArr[yIndex])
     testWavelengths=wavelengthCalibPoly(np.arange(arcRow.shape[0]))
@@ -1273,6 +1280,8 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
                     rectifiedData[y]=interpolate.splev(rectWavelengthsMap[y], tck, ext = 1)
                 except:
                     print "WARNING: splrep error, this slit will be blank"
+                    IPython.embed()
+                    sys.exit()
             img[extension].data=rectifiedData
             header['CTYPE1']='LINEAR'
             header['DISPAXIS']=1
