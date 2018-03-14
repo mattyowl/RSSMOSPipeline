@@ -16,8 +16,8 @@ the following grating/lamp/detector binning combinations:
 * pg1300 CuAr (2x2 binning)
 * pg1800 Ne (2x2 binning)
 
-More can be added relatively easily (see the modelArcSpectra dir), but no documentation on 
-this yet.
+More can be added relatively easily (see the `rss_mos_create_arc_model` script), but there is
+no documentation on this yet.
 
 The quickest way to check the wavelength calibration is to inspect the `arcTransformTest*.png` and 
 `skyCheck_SLIT*.png` files, found under `reducedDir/OBJECT_MASKID/diagnostics/`. The former show the
@@ -36,35 +36,55 @@ or 12 minutes with the non-iterative sky subtraction method.
 
 ## Software needed
 
-The pipeline is written in pure python (2.7.x). It needs the following modules to be installed:
+The pipeline is written in pure python (2.7.x; it should be trivial to port to python3). 
+It needs the following modules to be installed:
 
-* numpy
-* scipy
-* atpy
-* pyfits
-* matplotlib
+* numpy (tested on 1.14.1)
+* scipy (tested on 0.17.0)
+* astropy (tested on 2.0.4)
+* matplotlib (tested on 2.1.0)
+* IPython (tested on 5.5.0)
 
-IPython is used for debugging, but isn't needed to run the pipeline. So you can comment out
-```python
-import IPython
-``` 
-from the `rss_mos_reducer.py` script if you don't want to install IPython.
+IPython is used for debugging, but isn't really needed to run the pipeline.
 
-Instead of pyfits and atpy, astropy can potentially be used, but this isn't implemented yet.
+## Installation
+
+As root:
+    
+```
+sudo python setup.py install
+```
+
+Or, in your home directory:
+    
+```
+python setup.py install --prefix=$HOME/local
+```
+
+Then add `$HOME/local/bin` to $PATH, and e.g., `$HOME/local/lib/python2.7/site-packages` to $PYTHONPATH.
+
+```
+export PATH=$HOME/local/bin:$PATH    
+export PYTHONPATH=$HOME/local/lib/python2.7/site-packages:$PYTHONPATH
+```
+
+Or, possibly:
+
+```
+python setup.py install --user
+```
+
+also works?
 
 ## How to run
 
-1. Unpack the archive containing the pipeline code (```rss_mos_reducer.py```) and the ```modelArcSpectra```
-folder to some directory.
+1. Download and unpack the archive containing your SALT data. This pipeline will operate on the
+   contents of the `product` directory.
 
-2. Copy your raw data to the same directory, placing it in a folder (e.g., ```rawData/```). This 
-should contain the contents of the `product/` dir, as provided by SALT. Alternatively, you could create
-symlinks to the ```rss_mos_reducer.py``` script and ```modelArcSpectra``` directory.
-
-3.  Run the code, e.g.,
+2.  Run the code, e.g.,
 
     ```
-    python rss_mos_reducer.py rawData reducedData maskName
+    rss_mos_reducer product reducedDir maskName
     ```
 
     `maskName` is the combination of `OBJECT_MASKID` from the corresponding FITS header keywords.
@@ -73,21 +93,21 @@ symlinks to the ```rss_mos_reducer.py``` script and ```modelArcSpectra``` direct
     P001788N07 and live in a directory called `product` then you would run the pipeline with:
 
     ```
-    python rss_mos_reducer.py product reduced J0058.1+0031_P001788N07
+    rss_mos_reducer product reduced J0058.1+0031_P001788N07
     ```
     
     If you want to just list the masks found under a directory called `product` (without doing anything
     with the data) you can use:
     
     ```
-    python rss_mos_reducer.py product reduced list
+    rss_mos_reducer product reduced list
     ```
     
     And if you're super confident that nothing can go wrong, you can ask the pipeline to process
     data for all the masks it can find (in this case, under the `product` directory)
     
     ```
-    python rss_mos_reducer.py product reduced all
+    rss_mos_reducer product reduced all
     ```
     
     The processed data from each mask will be found in its own subdirectory under `reduced/` in the above
@@ -133,8 +153,7 @@ symlinks to the ```rss_mos_reducer.py``` script and ```modelArcSpectra``` direct
     solution as the WCS stored in the header.
 
 ## Longslit mode
-
-As of May 2016, the pipeline will run on longslit data. The code detects object traces in each science frame,
+The pipeline can also run on longslit data. The code detects object traces in each science frame,
 and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
 for MOS data. This might need some tweaking to allow the user to set detection thresholds manually (in which
 case, more command-line switches for this will be added).

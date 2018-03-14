@@ -1,0 +1,25 @@
+# Input coord file for constructing model arc spectrum
+# This contains accurate Angstrom coords matched to approximate pixel coords (read off using matplotlib plot)
+# We then centroid on nearest line in each case to refine the pixel coords
+# From this, we will create a model that we can fit to each row of spectrum to ultimately get a 2d wavelength solution
+# First column in angstroms, 2nd in x pixel coords
+# Obviously the latter would need changing depending on binning
+5852.49     715
+5881.90     783
+5944.83     929
+5975.53     1003
+6030.00     1129
+6096.16     1286
+6143.59     1394
+6163.59     1445
+6217.28     1573
+6266.49     1693
+6304.79     1789
+6334.43     1861
+6382.99     1982
+6402.25     2029
+6506.53     2292
+6532.88     2359
+6598.95     2526
+6678.28     2732
+6717.04     2839

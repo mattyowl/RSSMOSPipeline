@@ -1,31 +1,48 @@
-#!/usr/bin/env python
+"""
 
-"""Pipeline for reducing SALT RSS MOS data, using the stuff that comes in the product/ dir.
+    Routines used by the rss_mos_reducer script
 
+    Copyright 2014-2018 Matt Hilton (matt.hilton@mykolab.com)
+    
+    This file is part of RSSMOSPipeline.
+
+    RSSMOSPipeline is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    RSSMOSPipeline is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with RSSMOSPipeline.  If not, see <http://www.gnu.org/licenses/>.
+    
 """
 
 import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-import pyfits
+import astropy.io.fits as pyfits
 import glob
 import time
 import datetime
-import atpy
+import astropy.table as atpy
 import argparse
-#from astLib import *
 from scipy import interpolate
 from scipy import ndimage
 from scipy import optimize
 from scipy import stats
 import pickle
+import RSSMOSPipeline
 import IPython
 #plt.matplotlib.interactive(True)
 
 #-------------------------------------------------------------------------------------------------------------
 LOGFILE=None
-REF_MODEL_DIR="modelArcSpectra"
+REF_MODEL_DIR=RSSMOSPipeline.__path__[0]+os.path.sep+"data"+os.path.sep+"modelArcSpectra"
 
 # For checking wavelength calibration accuracy
 # Useful plot: http://www.astro.keele.ac.uk/jkt/GrSpInstructions/skylines1.jpg
@@ -132,7 +149,7 @@ def splitMEF(MEFFileName, rootOutFileName):
             outFileName=rootOutFileName.replace(".fits", "_%d.fits" % (i))
             if os.path.exists(outFileName) == True:
                 os.remove(outFileName)
-            newImg.writeto(outFileName, clobber = True)    
+            newImg.writeto(outFileName, overwrite = True)    
 
 #-------------------------------------------------------------------------------------------------------------
 def getImageInfo(rawDir):
@@ -220,7 +237,7 @@ def makeMasterFlats(maskDict, outDir, deltaHours = 0.5):
             img['SCI'].data=flatData
             if os.path.exists(masterFlatPath) == True:
                 os.remove(masterFlatPath)
-            img.writeto(masterFlatPath, clobber = True)
+            img.writeto(masterFlatPath, overwrite = True)
         maskDict['masterFlats'].append(masterFlatPath)
         
 #-------------------------------------------------------------------------------------------------------------
@@ -690,10 +707,11 @@ def makeChipGapMask(data):
     segmentationMap, numObjects=ndimage.label(chipGapMask)
     sigPixMask=np.equal(chipGapMask, 1)
     objIDs=np.unique(segmentationMap)
-    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
-    for objID, nPix in zip(objIDs, objNumPix):    
-        if nPix < minPix:
-            chipGapMask[np.equal(segmentationMap, objID)]=0.0
+    if len(objIDs) > 0:
+        objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+        for objID, nPix in zip(objIDs, objNumPix):    
+            if nPix < minPix:
+                chipGapMask[np.equal(segmentationMap, objID)]=0.0
     
     return chipGapMask
 
@@ -761,7 +779,7 @@ def applyFlatField(maskDict, outDir):
         if os.path.exists(f) == True:
             os.remove(f)
             
-        img.writeto(f, clobber = True)
+        img.writeto(f, overwrite = True)
 
 #-------------------------------------------------------------------------------------------------------------
 def findMatchingFileByTime(inputFileName, possibleFilesList):
@@ -858,13 +876,13 @@ def detectLines(data, sigmaCut = 3.0, thresholdSigma = 2.0, featureMinPix = 30, 
     objAmplitudes_centreRow=np.array(objAmplitudes_centreRow).flatten()
     minPixMask=np.greater(objNumPix, featureMinPix)
     featureTable=atpy.Table()
-    featureTable.add_column('id', objIDs[minPixMask])
-    featureTable.add_column('x_centreRow', objPositions_centreRow[minPixMask])
+    featureTable.add_column(atpy.Column(objIDs[minPixMask], 'id'))
+    featureTable.add_column(atpy.Column(objPositions_centreRow[minPixMask], 'x_centreRow'))
     if data.ndim == 2:
-        featureTable.add_column('y_centreRow', [data.shape[0]/2]*len(featureTable))
-        featureTable.add_column('amplitude', data[data.shape[0]/2, np.array(np.round(featureTable['x_centreRow']), dtype = int)])
+        featureTable.add_column(atpy.Column([data.shape[0]/2]*len(featureTable), 'y_centreRow'))
+        featureTable.add_column(atpy.Column(data[data.shape[0]/2, np.array(np.round(featureTable['x_centreRow']), dtype = int)], 'amplitude')) 
     elif data.ndim == 1:
-        featureTable.add_column('amplitude', objAmplitudes_centreRow[minPixMask])
+        featureTable.add_column(atpy.Column(objAmplitudes_centreRow[minPixMask], 'amplitude'))
 
     return featureTable, segmentationMap
 
@@ -1110,7 +1128,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # Tag features by transforming model coords to arc coords and looking for closest match
     # Set maxDistancePix high enough to get enough matches, but not so high bring in rubbish
     # Weak link may be centroiding done in detectLines
-    arcFeatureTable.add_column('wavelength', np.zeros(len(arcFeatureTable)))    
+    arcFeatureTable.add_column(atpy.Column(np.zeros(len(arcFeatureTable)), 'wavelength'))    
     maxDistancePix=10.0
     for row in refModelDict['featureTable']:
         transformed_model_x=(row['x_centreRow']-bestFitShift)/(1+bestFitScale)
@@ -1118,7 +1136,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
         if dist.min() < maxDistancePix:
             index=np.argmin(dist)
             arcFeatureTable['wavelength'][index]=row['wavelength']
-    arcFeatureTable=arcFeatureTable.where(arcFeatureTable['wavelength'] != 0)
+    arcFeatureTable=arcFeatureTable[np.where(arcFeatureTable['wavelength'] != 0)]
     diagnosticDict['numArcFeaturesIdentified']=len(arcFeatureTable)
     if len(arcFeatureTable) < 5:
         print "... aborted - less than 5 features identified in the arc ..."
@@ -1142,8 +1160,8 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # Find 2d wavelength solution which we can use for rectification/wavelength calibration
     # Fit functions for how feature x positions change with y
     ys=np.arange(arcData.shape[0])
-    arcFeatureTable.add_column('slope', np.zeros(len(arcFeatureTable)))
-    arcFeatureTable.add_column('intercept', np.zeros(len(arcFeatureTable)))
+    arcFeatureTable.add_column(atpy.Column(np.zeros(len(arcFeatureTable)), 'slope'))
+    arcFeatureTable.add_column(atpy.Column(np.zeros(len(arcFeatureTable)), 'intercept'))
     for row in arcFeatureTable:
         xs=np.zeros(arcData.shape[0])
         for i in range(len(ys)):
@@ -1307,7 +1325,7 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
     if os.path.exists(outFileName) == True:
         os.remove(outFileName)
         
-    img.writeto(outFileName, clobber = True)
+    img.writeto(outFileName, overwrite = True)
     
 #-------------------------------------------------------------------------------------------------------------
 def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
@@ -1351,7 +1369,9 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
                 if os.path.exists(modelFileName) == False:
                     print "No reference model exists for grating %s, lamp %s, with binning %s" % (grating, lampid, binning)
                     print "Use createModelArcSpectrum.py script under modelArcSpectra dir"
-                    print "(arcFileName: %s)" % (arcFileName)
+                    #print "(arcFileName: %s)" % (arcFileName)
+                    IPython.embed()
+                    sys.exit()
                     sys.exit()
                 diagnosticsLabel=os.path.split(cutArcPath)[-1].replace(".fits", "")+"_"+extension
 
@@ -1443,10 +1463,8 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     try:
         prof=prof/prof.max()
     except:
-        print "profile measurement fail - no object detected?"
-        print "add some sensible default profile for this case"
-        IPython.embed()
-        sys.exit()
+        print("... WARNING: profile measurement failed ...")
+        prof=np.zeros(data.shape[0])
     
     if np.any(np.isnan(prof)) == True:
         print "nans in object profile"
@@ -1498,10 +1516,14 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
     """
 
     print "... extracting spectrum ..."
-    
+
     # Throw away rows at edges as these often contain noise
     if throwAwayRows > 0:
         data=data[throwAwayRows:-throwAwayRows]
+    
+    if data.shape[0] == 0:
+        print("... WARNING: all data cut in iterativeWeightedExtraction ...")
+        return np.zeros(data.shape[1]), np.zeros(data.shape[1]), np.zeros(data.shape)
     
     # Find the chip gaps and make a mask
     chipGapMask=makeChipGapMask(data)
@@ -1522,6 +1544,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
     # For ignoring junk at the edges
     skyMask2d=identifySky(data)
 
+    warned=False
     while diff > tolerance or k > maxIterations:
         t0=time.time()
         xArr=[]
@@ -1559,16 +1582,22 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
             try:
                 x, R=optimize.nnls(A.transpose(), b)
             except:
-                raise Exception, "nnls problem - full of noise?"
-                ## This column must be completely full of noise
-                #x=np.zeros(data.shape[0]+2)
+                if warned == False:
+                    print("... WARNING: nnls problem - setting column to zero ...")
+                warned=True
+                x=np.zeros(b.shape[0]+2)
             xArr.append(x)
         
         # Below here as usual
         xArr=np.array(xArr).transpose()
         sky=xArr[1]
         sky2d=np.array([sky]*data.shape[0])
-        skySub=skySub-subFrac*sky2d 
+        try:
+            skySub=skySub-subFrac*sky2d 
+        except:
+            print("skySub fail")
+            IPython.embed()
+            sys.exit()
         signal=xArr[0]
         signal[np.less(signal, 0)]=0.
         signalArr[k]=signal
@@ -1684,7 +1713,10 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
 
     # First measurement of the profile of the object
     prof=measureProfile(data, np.zeros(data.shape))
-            
+    if prof.sum() == 0:
+        print("... WARNING: profile measurement is zero everywhere - returning empty spectrum ...")
+        return np.zeros(data.shape[1]), np.zeros(data.shape[1]), np.zeros(data.shape)
+        
     # Which rows to use as sky?
     skyMask2d=identifySky(data)
     
@@ -1715,6 +1747,7 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
             ws2d[:, i]=w[:, 0]
             wk2d[:, i]=w[:, 1]
             w=np.matrix(w)
+            w=np.nan_to_num(w)
             x, R=optimize.nnls(w, v)
             signal[i]=x[0]
             sky[i]=x[1]
@@ -1789,7 +1822,12 @@ def checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5, mismatchLi
             gapsList.append([wavelengths[min(indices)], wavelengths[max(indices)]])
 
     # To aid in finding sky lines, subtract off any large scale trend first...
-    smoothSky=ndimage.uniform_filter1d(sky, 30)
+    try:
+        smoothSky=ndimage.uniform_filter1d(sky, 30)
+    except:
+        print("smoothSky problem")
+        IPython.embed()
+        sys.exit()
     smoothSky=ndimage.uniform_filter1d(sky, sky.shape[0]/3)
     bckSubSky=sky-smoothSky
     
@@ -1798,7 +1836,7 @@ def checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5, mismatchLi
     cdelt=wavelengths[1]-wavelengths[0]
     crval1=wavelengths[0]
     featureTable, segMap=detectLines(bckSubSky, featureMinPix = featureMinPix, numBins = 8)
-    featureTable.add_column('wavelength', featureTable['x_centreRow']*cdelt+crval1)
+    featureTable.add_column(atpy.Column(featureTable['x_centreRow']*cdelt+crval1, 'wavelength'))
     diffs=[]
     usedSkyLines=[]
     usedArcLines=[]
@@ -1937,24 +1975,26 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                     plt.close()
                     
                 else:
-                    print "WARNING: empty slit"
+                    print("... WARNING: empty slit ...")
                     #signalList.append(np.zeros(data.shape[1]))
                     #skyList.append(np.zeros(data.shape[1]))
-
+        
+        CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
+        
+        if len(signalList) == 0:
+            print("... failed to construct CRMaskedDataCube - signalList empty - skipping %s ..." % (extension))
+            continue
+        
         # Wavelength calib diagnostic: does the sky line up from each science frame?
         fluxMax=0
         for sky, wavelengths, header in zip(skyList, wavelengthsList, headersList):
-            if np.sum(sky) == 0:
-                print "zero sky?"
-                IPython.embed()
-                sys.exit()
-                
-            flux=sky/np.median(sky)
-            if flux.max() > fluxMax:
-                fluxMax=flux.max()
-            plt.plot(wavelengths, flux)
-            medianOffset, numLines=checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5)
-            print "... individual frame - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" %(medianOffset, numLines)
+            if sky.shape[0] > 0:
+                flux=sky/np.median(sky)
+                if flux.max() > fluxMax:
+                    fluxMax=flux.max()
+                plt.plot(wavelengths, flux)
+                medianOffset, numLines=checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5)
+                print "... individual frame - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" %(medianOffset, numLines)
         for l in checkSkyLines:
             plt.plot([l]*10, np.linspace(0, fluxMax, 10), 'k--')
         plt.ylim(0, fluxMax)
@@ -1977,16 +2017,21 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
             tck=interpolate.splrep(wavelengthsArr[i], skyArr[i])
             regrid_skyArr[i]=interpolate.splev(regrid_wavelengths, tck, ext = 1) 
         signal=np.median(regrid_signalArr, axis = 0)
-        sky=np.median(regrid_skyArr, axis = 0) 
-        medianOffset, numLines=checkWavelengthCalibUsingSky(sky, regrid_wavelengths, featureMinPix = 5)
-        print "... extractAndStack - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
-        outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        write1DSpectrum(signal, sky, regrid_wavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
+        sky=np.median(regrid_skyArr, axis = 0)
+        try:
+            if sky.shape[0] > 0:
+                medianOffset, numLines=checkWavelengthCalibUsingSky(sky, regrid_wavelengths, featureMinPix = 5)
+                print "... extractAndStack - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
+                outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+                write1DSpectrum(signal, sky, regrid_wavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
+        except:
+            print("sky has no shape")
+            IPython.embed()
+            sys.exit()
         
         # 2d combined/extracted, projecting CR-masked arrays to same wavelength grid
         # NOTE: These all have different wavelength calibrations stored in wavelengthsList
         # NOTE: This assumes that the wavelength calibrations have similar accuracy... if [0] has a problem, then we do!
-        CRMaskedDataCube=np.ma.masked_array(CRMaskedDataCube)
         projDataCube=[]
         refWavelengths=wavelengthsList[0]
         refHeader=headersList[0]
@@ -1999,10 +2044,11 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                 for i in range(min([projData.shape[0], data.shape[0]])):
                     tck=interpolate.splrep(wavelengths, data.data[i])
                     projData[i]=interpolate.splev(refWavelengths, tck, ext = 1)
-                    tck=interpolate.splrep(wavelengths, data.mask[i])
-                    projMask[i]=interpolate.splev(refWavelengths, tck, ext = 1)
-                    projMask[i][np.less(projMask[i], 0.1)]=0.
-                    projMask[i]=np.array(projMask[i], dtype = bool)
+                    if len(CRMaskedDataCube.mask.shape) > 0:    # sometimes data.mask[i] is simply False, and not a mask
+                        tck=interpolate.splrep(wavelengths, data.mask[i])
+                        projMask[i]=interpolate.splev(refWavelengths, tck, ext = 1)
+                        projMask[i][np.less(projMask[i], 0.1)]=0.
+                        projMask[i]=np.array(projMask[i], dtype = bool)
                 projDataCube.append(np.ma.masked_array(projData, projMask))
         projDataCube=np.ma.masked_array(projDataCube)       
         # Very slow if use the masked array below...
@@ -2036,13 +2082,14 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         newImg.append(hdu)
         if os.path.exists(outFileName) == True:
             os.remove(outFileName)
-        newImg.writeto(outFileName, clobber = True)
+        newImg.writeto(outFileName, overwrite = True)
         newImg.close()
         
         # Quantify wavelength calibration accuracy using sky
-        medianOffset, numLines=checkWavelengthCalibUsingSky(sky, refWavelengths, featureMinPix = 5)
-        print "... stackAndExtract - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
-        skyWavelengthCalibCheckList.append([extension, medianOffset, numLines])
+        if sky.sum() > 0:
+            medianOffset, numLines=checkWavelengthCalibUsingSky(sky, refWavelengths, featureMinPix = 5)
+            print "... stackAndExtract - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines)
+            skyWavelengthCalibCheckList.append([extension, medianOffset, numLines])
         
         # Write 2d, sky subtracted combined spectrum
         #outFileName=stackExtractSpecDir+os.path.sep+"2D_noSky_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
@@ -2251,97 +2298,8 @@ def write1DSpectrum(signal, sky, wavelength, outFileName, maskRA, maskDec, mask 
     HDUList[0].header['MASKDEC']=maskDec
     if os.path.exists(outFileName) == True:
         os.remove(outFileName)
-    HDUList.writeto(outFileName, clobber=True)   
+    HDUList.writeto(outFileName, overwrite = True)   
     
-#-------------------------------------------------------------------------------------------------------------
-if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser("rss_mos_reducer.py")
-    parser.add_argument("rawDir", help="The directory that holds the partially-processed data. Usually called product.")
-    parser.add_argument("reducedDir", help="The directory where the reduced data will be written, along with any diagnostic data. This directory will be created if it doesn't already exist.")
-    parser.add_argument("maskName", help="Use 'all' to reduce all data found under rawDir/, or 'list' to list all masks (by object) found under rawDir/. The maskName is made from the keyword combination OBJECT_MASKID found in the .fits headers.") 
-    parser.add_argument("-t", "--threshold", dest="threshold", default=0.1, help="Threshold used for the slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline. Values in the range 0.1-0.4 work best (default=0.1; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
-    parser.add_argument("-i", "--iterative-extraction", dest="iterativeMethod", action='store_true', help = "Use the iterative spectral extraction method.")
-    parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the iterative spectral extraction algorithm (default=0.8; increase this value for faster convergence). This only has an effect if the -i switch is also used.")
-    parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
-    parser.add_argument("-s", "--slits", dest="extensionsList", default="all", help="Reduce the data corresponding to the given slit names only. Separate slit names with , but no spaces (e.g., -e SLIT9,SLIT15).")
-
-    args = parser.parse_args()
-
-    rawDir=args.rawDir
-    baseOutDir=args.reducedDir
-    maskName=args.maskName
-    
-    threshold=float(args.threshold)
-    subFrac=float(args.subFrac)
-    iterativeMethod=args.iterativeMethod
-    excludeMasks=args.excludeMasks.split(",")
-    extensionsList=args.extensionsList
-    if extensionsList != "all":
-        extensionsList=extensionsList.split(",")
-    
-    if os.path.exists(baseOutDir) == False:
-        os.makedirs(baseOutDir)
-        
-    # Sort out what's what...
-    infoDict=getImageInfo(rawDir)
-    
-    if maskName == 'list':
-        maskList=infoDict.keys()
-        maskList.sort()
-        print "Masks found: %s" % (str(maskList))
-        sys.exit()
-    elif maskName != 'all':
-        shortDict={}
-        for key in infoDict.keys():
-            if key == maskName:
-                shortDict[key]=infoDict[key]
-        infoDict=shortDict
-        
-    if maskName != 'all' and maskName not in infoDict.keys():
-        print "ERROR: maskName not found. Try using 'list' to see available maskNames."
-        sys.exit()
-
-    masksToReduce=[]
-    for key in infoDict.keys():
-        if key not in excludeMasks:
-            masksToReduce.append(key)
-            
-    # We're organised by object name, reduce each in turn
-    for maskName in masksToReduce:
-        
-        print ">>> Mask: %s" % (maskName)
-        
-        outDir=baseOutDir+os.path.sep+maskName
-        if os.path.exists(outDir) == False:
-            os.makedirs(outDir)
-    
-        # Log what options we're running with
-        logFile=file(outDir+os.path.sep+"rss_mos_reducer.log", "w")
-        logFile.write("started: %s\n" % (datetime.datetime.now().isoformat()))
-        for key in args.__dict__.keys():
-            logFile.write("%s: %s\n" % (key, str(args.__dict__[key])))
-        logFile.close()
-    
-        # Tied ourselves in knots a bit here...
-        maskDict=infoDict[maskName][infoDict[maskName]['maskID']]
-        maskDict['maskID']=infoDict[maskName]['maskID']
-        maskDict['objName']=infoDict[maskName]['objName']
-        maskType=infoDict[maskName]['maskType']
-        
-        makeMasterFlats(maskDict, outDir)
-
-        if maskType == 'MOS':
-            cutIntoSlitLets(maskDict, outDir, threshold = threshold)
-        elif maskType == 'LONGSLIT':
-            cutIntoPseudoSlitLets(maskDict, outDir)
-        
-        applyFlatField(maskDict, outDir)
-        
-        wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList)
-
-        extractAndStackSpectra(maskDict, outDir, extensionsList = extensionsList, 
-                               iterativeMethod = iterativeMethod, subFrac = subFrac)
- 
     
     
