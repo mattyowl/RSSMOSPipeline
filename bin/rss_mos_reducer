@@ -68,9 +68,9 @@ if __name__ == '__main__':
     infoDict=RSSMOSTools.getImageInfo(rawDir)
     
     if maskName == 'list':
-        maskList=infoDict.keys()
+        maskList=list(infoDict.keys())
         maskList.sort()
-        print "Masks found: %s" % (str(maskList))
+        print("Masks found: %s" % (str(maskList)))
         sys.exit()
     elif maskName != 'all':
         shortDict={}
@@ -80,7 +80,7 @@ if __name__ == '__main__':
         infoDict=shortDict
         
     if maskName != 'all' and maskName not in infoDict.keys():
-        print "ERROR: maskName not found. Try using 'list' to see available maskNames."
+        print("ERROR: maskName not found. Try using 'list' to see available maskNames.")
         sys.exit()
 
     masksToReduce=[]
@@ -91,14 +91,14 @@ if __name__ == '__main__':
     # We're organised by object name, reduce each in turn
     for maskName in masksToReduce:
         
-        print ">>> Mask: %s" % (maskName)
+        print(">>> Mask: %s" % (maskName))
         
         outDir=baseOutDir+os.path.sep+maskName
         if os.path.exists(outDir) == False:
             os.makedirs(outDir)
     
         # Log what options we're running with
-        logFile=file(outDir+os.path.sep+"rss_mos_reducer.log", "w")
+        logFile=open(outDir+os.path.sep+"rss_mos_reducer.log", "w")
         logFile.write("started: %s\n" % (datetime.datetime.now().isoformat()))
         for key in args.__dict__.keys():
             logFile.write("%s: %s\n" % (key, str(args.__dict__[key])))

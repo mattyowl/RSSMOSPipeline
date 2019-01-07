@@ -20,6 +20,6 @@
     along with RSSMOSPipeline.  If not, see <http://www.gnu.org/licenses/>.
     
 """
-import RSSMOSTools
+from . import RSSMOSTools
 
 __version__ = "git"
