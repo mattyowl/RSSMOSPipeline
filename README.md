@@ -36,8 +36,7 @@ or 12 minutes with the non-iterative sky subtraction method.
 
 ## Software needed
 
-The pipeline is written in pure python (2.7.x; it should be trivial to port to python3). 
-It needs the following modules to be installed:
+The pipeline is written in pure python (2.7.x / 3.x). It needs the following modules to be installed:
 
 * numpy (tested on 1.14.1)
 * scipy (tested on 0.17.0)
@@ -74,7 +73,7 @@ Or, possibly:
 python setup.py install --user
 ```
 
-also works?
+(this works on Ubuntu).
 
 ## How to run
 
