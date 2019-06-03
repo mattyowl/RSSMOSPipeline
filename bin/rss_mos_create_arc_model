@@ -28,7 +28,7 @@
 
 import os
 import sys
-import pyfits
+import astropy.io.fits as pyfits
 import astropy.table as atpy
 #from astLib import *
 import matplotlib.pyplot as plt
@@ -36,7 +36,7 @@ import numpy as np
 from scipy import ndimage
 from scipy import interpolate
 from scipy import optimize
-import optparse
+import argparse
 import pickle
 import IPython
 #plt.matplotlib.interactive(True)
@@ -216,7 +216,7 @@ def findWavelengthCalibration(arcFileName, modelFileName, sigmaCut = 3.0, thresh
     #plt.matplotlib.interactive(True)
     for row in arcFeatureTable:
         count=count+1
-        print "... %d/%d ..." % (count, len(arcFeatureTable))
+        print("... %d/%d ..." % (count, len(arcFeatureTable)))
         xs=np.zeros(ys.shape)
         for i in range(len(ys)):
             objPositions=ndimage.center_of_mass(arcData[ys[i]], labels = arcSegMap, index = arcFeatureTable['id'])
@@ -270,35 +270,34 @@ if __name__ == '__main__':
 
     """
 
-    parser = optparse.OptionParser(usage)
-    parser.add_option("-y", "--y", dest="yRow", help="row from which to extract arc spectrum")
-    options, args = parser.parse_args()
-
-    if len(args) != 1:
-        parser.error("What the...?!?! You fool! That's the wrong number of arguments!")    
-
-    arcFileName=args[0]
+    parser=argparse.ArgumentParser("rss_mos_create_arc_model")
+    parser.add_argument("arcFileName", help="Path to 2d arc file name")
+    parser.add_argument("-y", "--y", dest="yRow", help="row from which to extract arc spectrum")
+    args=parser.parse_args()
     
     #if os.path.exists(modelsDir) == False:
         #os.makedirs(modelsDir)
     
-    img=pyfits.open(arcFileName)
-    data=img['SCI'].data
-    header=img[0].header
+    with pyfits.open(args.arcFileName) as img:
+        data=img['SCI'].data
+        header=img[0].header
 
-    if options.yRow != None:
-        row=int(options.yRow)
+    if args.yRow is not None:
+        row=int(args.yRow)
     else:
-        row=data.shape[0]/2
-            
+        row=int(data.shape[0]/2)
+    
     coordsFileName=header['GRATING']+"_"+header['LAMPID']+"_"+header['CCDSUM'].replace(" ", "x")+".txt"
     modelFileName="RefModel_"+coordsFileName.replace(".txt", ".pickle")
-    
+    print("coordsFileName = %s" % (coordsFileName))
+    print("modelFileName = %s" % (modelFileName))
     if os.path.exists(coordsFileName) == False:
-        print "Coordinates file not found - you need to make one..."
-        print "1. Use the plot window to record approximate pixel coords (x-axis) for spectral lines identified in a calibrated arc plot (see http://pysalt.salt.ac.za/lineatlas/lineatlas.html and look under the heading 'Arc Lamp Plots')."
-        print "2. Save a text file (name it %s) in the current directory, which has columns: Wavelengh (Angstroms, float), pixel coord (integer) on x-axis." % (coordsFileName)
-        print "3. Close the plot window and re-run this script to generate the model."
+        print("Coordinates file not found - you need to make one...")
+        print("1. Use the plot window to record approximate pixel coords (x-axis) for spectral lines identified in a calibrated arc plot") 
+        print("   (see http://pysalt.salt.ac.za/lineatlas/lineatlas.html and look under the heading 'Arc Lamp Plots').")
+        print("2. Save a text file (name it %s) in the current directory, which has columns: Wavelengh (Angstroms, float), pixel coord (integer) on x-axis." % (coordsFileName))
+        print("3. Close the plot window and re-run this script to generate the model.")
+        print("4. Copy the model .pickle and .txt file to the RSSMOSPipeline/data/modelArcSpectra/ directory and re-run the setup.py script")
         plt.plot(data[row])
         plt.title(coordsFileName)
         plt.show()

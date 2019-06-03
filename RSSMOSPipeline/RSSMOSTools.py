@@ -212,7 +212,7 @@ def getImageInfo(rawDir):
                         # Just so we can track this later in output 1d spectra
                         infoDict[maskName][maskID]['RA']=header['RA']
                         infoDict[maskName][maskID]['DEC']=header['DEC']
-                    
+
     return infoDict
 
 #-------------------------------------------------------------------------------------------------------------
@@ -397,7 +397,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
         writeDS9SlitRegions(regFileName, slitsDict, f)
         
 #-------------------------------------------------------------------------------------------------------------
-def cutIntoPseudoSlitLets(maskDict, outDir):
+def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0):
     """For longslit data. Finds objects, and then cuts into pseudo-slitlets: we take some region +/- Y pixels
     around the object trace and pretend that is a MOS slitlet. Outputs MEF files.
             
@@ -407,7 +407,7 @@ def cutIntoPseudoSlitLets(maskDict, outDir):
     maskDict['slitsDicts']={}
     for i in range(len(maskDict['OBJECT'])):
         objPath=maskDict['OBJECT'][i]
-        slitsDict=findPseudoSlits(objPath)
+        slitsDict=findPseudoSlits(objPath, thresholdSigma = thresholdSigma)
         maskDict['slitsDicts'][objPath]=slitsDict
     
     # There can be significant offsets between object traces in longslit frames
@@ -555,8 +555,8 @@ def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
             yMin=None
             yMax=None
     
-    # Debugging
-    #print "Check slitsDict"
+    ## Debugging
+    #print("Check slitsDict")
     #IPython.embed()
     #sys.exit()
     
@@ -639,8 +639,8 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     
     """ 
     
-    img=pyfits.open(objFileName)
-    d=img['SCI'].data
+    with pyfits.open(objFileName) as img:
+        d=img['SCI'].data
         
     # Take out spectrum of flat lamp (approx)
     a=np.median(d, axis = 0)
@@ -653,7 +653,7 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     # Find local background, noise (running clipped mean)
     prof=np.median(d, axis = 1)    
     prof[np.less(prof, 0)]=0.
-    halfBlkSize=50
+    halfBlkSize=100 # was 50
     sigmaCut=3.0        
     bck=np.zeros(prof.shape)
     sig=np.zeros(prof.shape)
@@ -670,10 +670,10 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
             nonZeroMask=np.not_equal(prof[yMin:yMax], 0)
             mask=np.less(abs(prof[yMin:yMax]-mean), sigmaCut*sigma)
             mean=np.mean(prof[yMin:yMax][mask])
-            sigma=np.std(prof[yMin:yMax][mask])            
+            sigma=np.std(prof[yMin:yMax][mask]-mean)            
         bck[y]=mean
         sig[y]=sigma
-    
+   
     # Detect peaks
     profSNR=(prof-bck)/sig    
     mask=np.greater(profSNR, thresholdSigma)    
@@ -695,7 +695,10 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
         if (yMax - yMin) > minSlitHeight:
             slitCount=slitCount+1
             slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax, 'yCentre': yPos}    
-            
+
+    if slitsDict == {}:
+        raise Exception("didn't find any object traces - try adjusting --longslit-threshold")
+    
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------

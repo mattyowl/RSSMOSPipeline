@@ -41,7 +41,8 @@ if __name__ == '__main__':
     parser.add_argument("rawDir", help="The directory that holds the partially-processed data. Usually called product.")
     parser.add_argument("reducedDir", help="The directory where the reduced data will be written, along with any diagnostic data. This directory will be created if it doesn't already exist.")
     parser.add_argument("maskName", help="Use 'all' to reduce all data found under rawDir/, or 'list' to list all masks (by object) found under rawDir/. The maskName is made from the keyword combination OBJECT_MASKID found in the .fits headers.") 
-    parser.add_argument("-t", "--threshold", dest="threshold", default=0.1, help="Threshold used for the slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline. Values in the range 0.1-0.4 work best (default=0.1; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
+    parser.add_argument("-t", "--threshold", dest="threshold", default=0.1, help="Threshold used for the MOS slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline. Values in the range 0.1-0.4 work best (default=0.1; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
+    parser.add_argument("-T", "--longslit-threshold", dest="longslitThreshold", default=2.0, help="Threshold used for the longslit pseudo-slit finding algorithm, in sigma (i.e., for detecting object traces).")
     parser.add_argument("-i", "--iterative-extraction", dest="iterativeMethod", action='store_true', help = "Use the iterative spectral extraction method.")
     parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the iterative spectral extraction algorithm (default=0.8; increase this value for faster convergence). This only has an effect if the -i switch is also used.")
     parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
@@ -54,6 +55,7 @@ if __name__ == '__main__':
     maskName=args.maskName
     
     threshold=float(args.threshold)
+    longslitThreshold=float(args.longslitThreshold)
     subFrac=float(args.subFrac)
     iterativeMethod=args.iterativeMethod
     excludeMasks=args.excludeMasks.split(",")
@@ -115,7 +117,7 @@ if __name__ == '__main__':
         if maskType == 'MOS':
             RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold)
         elif maskType == 'LONGSLIT':
-            RSSMOSTools.cutIntoPseudoSlitLets(maskDict, outDir)
+            RSSMOSTools.cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = longslitThreshold)
         
         RSSMOSTools.applyFlatField(maskDict, outDir)
         
