@@ -1375,11 +1375,9 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
                 print("... extension = %s ..." % (extension))
                 arcData=img[extension].data
                 if os.path.exists(modelFileName) == False:
-                    print("No reference model exists for grating %s, lamp %s, with binning %s" % (grating, lampid, binning))
-                    print("Use createModelArcSpectrum.py script under modelArcSpectra dir")
-                    #print "(arcFileName: %s)" % (arcFileName)
-                    IPython.embed()
-                    sys.exit()
+                    print("No reference model exists for grating %s, lamp %s, with binning %s." % (grating, lampid, binning))
+                    print("Use rss_mos_create_arc_model to make a reference model and then re-run.")
+                    print("arcFileName: %s" % (cutArcPath))
                     sys.exit()
                 diagnosticsLabel=os.path.split(cutArcPath)[-1].replace(".fits", "")+"_"+extension
 

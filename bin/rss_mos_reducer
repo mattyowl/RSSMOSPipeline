@@ -31,7 +31,7 @@ import datetime
 import argparse
 from RSSMOSPipeline import RSSMOSTools
 #import pickle
-#import IPython
+import IPython
 #plt.matplotlib.interactive(True)
     
 #-------------------------------------------------------------------------------------------------------------
@@ -72,7 +72,9 @@ if __name__ == '__main__':
     if maskName == 'list':
         maskList=list(infoDict.keys())
         maskList.sort()
-        print("Masks found: %s" % (str(maskList)))
+        print("Found %d masks:" % (len(maskList)))
+        for key in maskList:
+            print("    %s" % (key))
         sys.exit()
     elif maskName != 'all':
         shortDict={}

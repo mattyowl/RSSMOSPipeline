@@ -13,15 +13,20 @@ the following grating/lamp/detector binning combinations:
 * pg0900 Ne (2x2 binning)
 * pg0900 Xe (2x2 binning)
 * pg1300 Ar (2x2 binning)
+* pg1300 Ar (1x2 binning)
+* pg1300 Ne (1x2 binning)
 * pg1300 CuAr (2x2 binning)
 * pg1800 Ne (2x2 binning)
 
-More can be added relatively easily (see the `rss_mos_create_arc_model` script), but there is
-no documentation on this yet.
+More can be added relatively easily (see the `rss_mos_create_arc_model` script, which will 
+print instructions when you run it).
 
 The quickest way to check the wavelength calibration is to inspect the `arcTransformTest*.png` and 
-`skyCheck_SLIT*.png` files, found under `reducedDir/OBJECT_MASKID/diagnostics/`. The former show the
-transformed arc spectrum compared to the reference model, while the latter plot the sky signal extracted from each science frame for each slit, with the reference wavelengths of prominent sky lines shown as vertical dashed lines for comparison. If these don't line up, then an additional (or revised) reference model is needed. 
+`skyCheck_SLIT*.png` files, found under `reducedDir/OBJECT_MASKID/diagnostics/`. The former 
+show the transformed arc spectrum compared to the reference model, while the latter plot the sky 
+signal extracted from each science frame for each slit, with the reference wavelengths of prominent
+sky lines shown as vertical dashed lines for comparison. If these don't line up, then an additional
+(or revised) reference model is needed. 
 
 The size in Angstroms of any offset from prominent sky lines in each final stacked spectrum is logged in 
 `reducedDir/OBJECT_MASKID/diagnostics/skyWavelengthCalibCheck.csv`. As well as the median offset
@@ -36,7 +41,8 @@ or 12 minutes with the non-iterative sky subtraction method.
 
 ## Software needed
 
-The pipeline is written in pure python (2.7.x / 3.x). It needs the following modules to be installed:
+The pipeline is written in pure python (only 3.x is supported now). It needs the following modules to 
+be installed:
 
 * numpy (tested on 1.14.1)
 * scipy (tested on 0.17.0)
@@ -60,7 +66,7 @@ Or, in your home directory:
 python setup.py install --prefix=$HOME/local
 ```
 
-Then add `$HOME/local/bin` to $PATH, and e.g., `$HOME/local/lib/python2.7/site-packages` to $PYTHONPATH.
+Then add `$HOME/local/bin` to $PATH, and e.g., `$HOME/local/lib/python3.6/site-packages` to $PYTHONPATH.
 
 ```
 export PATH=$HOME/local/bin:$PATH    
@@ -154,8 +160,7 @@ python setup.py install --user
 ## Longslit mode
 The pipeline can also run on longslit data. The code detects object traces in each science frame,
 and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
-for MOS data. This might need some tweaking to allow the user to set detection thresholds manually (in which
-case, more command-line switches for this will be added).
+for MOS data. If necessary, you can use the --longslit-threshold option to change the detection threshold used.
 
 ## Things which can/should be improved/added
 * extraction (not optimal at the moment)

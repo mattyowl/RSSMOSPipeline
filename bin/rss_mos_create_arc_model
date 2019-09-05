@@ -85,15 +85,15 @@ def detectLines(data, sigmaCut = 3.0, thresholdSigma = 5.0, featureMinPix = 30):
     sigPixMask=np.equal(mask, 1)
     objIDs=np.unique(segmentationMap)
     objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
-    objPositions_centreRow=ndimage.center_of_mass(data[data.shape[0]/2], labels = segmentationMap, index = objIDs)
+    objPositions_centreRow=ndimage.center_of_mass(data[int(data.shape[0]/2)], labels = segmentationMap, index = objIDs)
     objPositions_centreRow=np.array(objPositions_centreRow).flatten()
     minPixMask=np.greater(objNumPix, featureMinPix)
     featureTable=atpy.Table()
-    featureTable.add_column('id', objIDs[minPixMask])
-    featureTable.add_column('x_centreRow', objPositions_centreRow[minPixMask])
-    featureTable.add_column('y_centreRow', [data.shape[0]/2]*len(featureTable))
-    featureTable.add_column('amplitude', data[data.shape[0]/2, np.array(np.round(featureTable['x_centreRow']), dtype = int)])
-
+    featureTable.add_column(atpy.Column(objIDs[minPixMask], 'id'))
+    featureTable.add_column(atpy.Column(objPositions_centreRow[minPixMask], 'x_centreRow'))
+    featureTable.add_column(atpy.Column([int(data.shape[0]/2)]*len(featureTable), 'y_centreRow'))
+    featureTable.add_column(atpy.Column(data[int(data.shape[0]/2), np.array(np.round(featureTable['x_centreRow']), dtype = int)], 'amplitude'))
+    
     return featureTable, segmentationMap
 
 #-------------------------------------------------------------------------------------------------------------
@@ -107,13 +107,13 @@ def tagWavelengthFeatures(featureTable, approxCoordsDict):
     
     """
 
-    featureTable.add_column('wavelength', np.zeros(len(featureTable)))
+    featureTable.add_column(atpy.Column(np.zeros(len(featureTable)), 'wavelength'))
     for x in approxCoordsDict.keys():
         wavelength=approxCoordsDict[x]
         rowNumber=np.argmin(abs(x-featureTable['x_centreRow']))
         featureTable['wavelength'][rowNumber]=wavelength
 
-    featureTable=featureTable.where(featureTable['wavelength'] != 0)
+    featureTable=featureTable[np.where(featureTable['wavelength'] != 0)]
     
     return featureTable
 
@@ -132,7 +132,7 @@ def makeModelArcSpectrum(data, approxCoordsDict, outFileName, yRow, sigmaCut = 3
     
     # Save reference model as a pickled dictionary
     refModelDict={'featureTable': featureTable, 'arc_centreRow': data_centreRow}
-    pickleFile=file(outFileName, "wb")
+    pickleFile=open(outFileName, "wb")
     pickler=pickle.Pickler(pickleFile)
     pickler.dump(refModelDict)
     pickleFile.close()
@@ -151,7 +151,7 @@ def findWavelengthCalibration(arcFileName, modelFileName, sigmaCut = 3.0, thresh
     """
     
     # Load reference model
-    pickleFile=file(modelFileName, "rb")
+    pickleFile=open(modelFileName, "rb")
     unpickler=pickle.Unpickler(pickleFile)
     refModelDict=unpickler.load()
     pickleFile.close()
@@ -194,7 +194,7 @@ def findWavelengthCalibration(arcFileName, modelFileName, sigmaCut = 3.0, thresh
         if dist.min() < maxDistancePix:
             index=np.argmin(dist)
             arcFeatureTable['wavelength'][index]=row['wavelength']
-    arcFeatureTable=arcFeatureTable.where(arcFeatureTable['wavelength'] != 0)
+    arcFeatureTable=arcFeatureTable[np.where(arcFeatureTable['wavelength'] != 0)]
     
     # Sanity check: tagged features
     plt.plot(arcData[arcData.shape[0]/2], 'b-')
@@ -211,7 +211,7 @@ def findWavelengthCalibration(arcFileName, modelFileName, sigmaCut = 3.0, thresh
     ys=np.arange(border, arcData.shape[0]-border, stepPix)
     order=6
     for o in range(order+1):
-        arcFeatureTable.add_column('poly%d' % (o), np.zeros(len(arcFeatureTable)))
+        arcFeatureTable.add_column(atpy.Column(np.zeros(len(arcFeatureTable)), 'poly%d' % (o)))
     count=0
     #plt.matplotlib.interactive(True)
     for row in arcFeatureTable:
