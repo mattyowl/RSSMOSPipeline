@@ -10,6 +10,7 @@ For wavelength calibration, a reference model needs to be made. So far this has 
 the following grating/lamp/detector binning combinations:
 
 * pg0900 Ar (2x2 binning)
+* pg0900 Ne (1x2 binning)
 * pg0900 Ne (2x2 binning)
 * pg0900 Xe (2x2 binning)
 * pg1300 Ar (2x2 binning)

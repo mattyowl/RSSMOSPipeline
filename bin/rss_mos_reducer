@@ -29,6 +29,7 @@ import glob
 import time
 import datetime
 import argparse
+import numpy as np
 from RSSMOSPipeline import RSSMOSTools
 #import pickle
 import IPython
@@ -74,7 +75,12 @@ if __name__ == '__main__':
         maskList.sort()
         print("Found %d masks:" % (len(maskList)))
         for key in maskList:
-            print("    %s" % (key))
+            infoStr=""
+            for maskKey in infoDict[key].keys():
+                if type(infoDict[key][maskKey]) == dict and len(infoDict[key][maskKey]['modelExists']) > 0:
+                    infoStr=infoStr+str(infoDict[key][maskKey]['modelExists'][0])
+                    infoStr=infoStr+"\t"+str(infoDict[key][maskKey]['modelFileNames'][0])
+            print("    %s\t%s" % (key, infoStr))
         sys.exit()
     elif maskName != 'all':
         shortDict={}
@@ -90,7 +96,18 @@ if __name__ == '__main__':
     masksToReduce=[]
     for key in infoDict.keys():
         if key not in excludeMasks:
-            masksToReduce.append(key)
+            addMask=False
+            for maskKey in infoDict[key].keys():
+                if type(infoDict[key][maskKey]) == dict and len(infoDict[key][maskKey]['modelExists']) > 0:
+                    if np.all(infoDict[key][maskKey]['modelExists']) == True:
+                        addMask=True
+                    break
+            if addMask == True:
+                masksToReduce.append(key)
+            else:
+                print("Skipping mask '%s' as no wavelength calibration reference model currently exists." % (key))
+                print("    Use rss_mos_create_arc_model to make a reference model and then re-run.")
+                print("    arc files list: %s" % (infoDict[key][maskKey]['ARC']))
             
     # We're organised by object name, reduce each in turn
     for maskName in masksToReduce:

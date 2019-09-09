@@ -170,7 +170,9 @@ def getImageInfo(rawDir):
     infoDict={}
     files=glob.glob(rawDir+os.path.sep+"mbxgp*.fits")  # Files either GMOS N or S depending on mask name
     
-    # First, get object names
+    # First, get object names, and assemble global list of arcs and flats
+    arcsList=[]
+    flatsList=[]
     for f in files:
         img=pyfits.open(f)
         header=img[0].header
@@ -184,7 +186,11 @@ def getImageInfo(rawDir):
                 infoDict[maskName]['maskID']=maskID             # Clunky, but convenient
                 infoDict[maskName]['maskType']=header['MASKTYP']  
                 infoDict[maskName]['objName']=header['OBJECT'].replace("'", "").replace('"', "")  
-
+            elif obsType == 'FLAT':
+                flatsList.append(f)
+            elif obsType == 'ARC':
+                arcsList.append(f)
+    
     # Now add flats etc.
     for maskName in infoDict.keys():
         
@@ -201,17 +207,43 @@ def getImageInfo(rawDir):
 
                 if maskID == infoDict[maskName]['maskID']:
                                     
-                    # NOTE: we could add some checks for e.g. grating, camera station etc. here
-                    # i.e., match flats, arcs to object frames here
                     if obsType not in infoDict[maskName][maskID].keys():
                         infoDict[maskName][maskID][obsType]=[]
-                    if obsType != 'OBJECT':
-                        infoDict[maskName][maskID][obsType].append(f)
-                    elif obsType == 'OBJECT' and objName == infoDict[maskName]['objName']:
+                    if obsType == 'OBJECT' and objName == infoDict[maskName]['objName']:
                         infoDict[maskName][maskID][obsType].append(f)
                         # Just so we can track this later in output 1d spectra
                         infoDict[maskName][maskID]['RA']=header['RA']
                         infoDict[maskName][maskID]['DEC']=header['DEC']
+                        # Add matching arcs and flats
+                        for o in ['FLAT', 'ARC', 'modelFileNames', 'modelExists']:
+                            if o not in infoDict[maskName][maskID].keys():
+                                infoDict[maskName][maskID][o]=[]
+                        possFlats=findMatchingFilesByTime(f, flatsList)
+                        for p in possFlats:
+                            matchesSettings=False
+                            with pyfits.open(p) as pImg:
+                                if pImg[0].header['GRATING'] == header['GRATING'] and pImg[0].header['CCDSUM'] == header['CCDSUM']:
+                                    matchesSettings=True
+                            if p not in infoDict[maskName][maskID]['FLAT'] and matchesSettings == True:
+                                infoDict[maskName][maskID]['FLAT'].append(p)
+                        possArcs=findMatchingFilesByTime(f, arcsList)
+                        for p in possArcs:
+                            if p not in infoDict[maskName][maskID]['ARC']:
+                                matchesSettings=False
+                                with pyfits.open(p) as pImg:
+                                    if pImg[0].header['GRATING'] == header['GRATING'] and pImg[0].header['CCDSUM'] == header['CCDSUM']:
+                                        matchesSettings=True
+                                    binning=pImg[0].header['CCDSUM'].replace(" ", "x")
+                                    grating=pImg[0].header['GRATING']
+                                    lampid=pImg[0].header['LAMPID']
+                                    modelFileName=REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle"
+                                if modelFileName not in infoDict[maskName][maskID]['modelFileNames'] and matchesSettings == True:
+                                    infoDict[maskName][maskID]['modelFileNames'].append(modelFileName)
+                                    if os.path.exists(modelFileName) == True:
+                                        infoDict[maskName][maskID]['modelExists'].append(True)
+                                    else:
+                                        infoDict[maskName][maskID]['modelExists'].append(False)                                    
+                                    infoDict[maskName][maskID]['ARC'].append(p)
 
     return infoDict
 
@@ -377,14 +409,14 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
     maskDict['cutFlatDict']={}
     maskDict['cutArcDict']={}
     for f, outFileName in zip(toCutList, outCutList):
-        flatFileName=findMatchingFileByTime(f, maskDict['masterFlats'])
+        flatFileName=findMatchingFilesByTime(f, maskDict['masterFlats'], timeInterval = None)[0]
         slitsDict=maskDict['slitsDicts'][flatFileName]
         print("... cutting %s (and arcs, flats) using %s for slit definition ..." % (f, flatFileName))
         label=os.path.split(flatFileName)[-1].replace(".fits", "")
         # Object
         cutSlits(f, outFileName, slitsDict)
         # Arc
-        arcFileName=findMatchingFileByTime(f, maskDict['ARC'])
+        arcFileName=findMatchingFilesByTime(f, maskDict['ARC'])[0]
         cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
         cutSlits(arcFileName, cutArcFileName, slitsDict)
         maskDict['cutArcDict'][f]=cutArcFileName
@@ -457,12 +489,12 @@ def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0):
         # Object
         cutSlits(f, outFileName, slitsDict)
         # Arc
-        arcFileName=findMatchingFileByTime(f, maskDict['ARC'])
+        arcFileName=findMatchingFilesByTime(f, maskDict['ARC'])[0]
         cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
         cutSlits(arcFileName, cutArcFileName, slitsDict)
         maskDict['cutArcDict'][f]=cutArcFileName
         # Flat
-        flatFileName=findMatchingFileByTime(f, maskDict['masterFlats'])
+        flatFileName=findMatchingFilesByTime(f, maskDict['masterFlats'], timeInterval = None)[0]
         cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
         cutSlits(flatFileName, cutFlatFileName, slitsDict)
         maskDict['cutFlatDict'][f]=cutFlatFileName
@@ -790,11 +822,13 @@ def applyFlatField(maskDict, outDir):
         img.writeto(f, overwrite = True)
 
 #-------------------------------------------------------------------------------------------------------------
-def findMatchingFileByTime(inputFileName, possibleFilesList):
-    """Identify the file name in possibleFilesList that is closest to inputFileName in terms of time.
-    Use to find corresponding arcs, flats.
+def findMatchingFilesByTime(inputFileName, possibleFilesList, timeInterval = 3600.0):
+    """Returns a list of filenames in possibleFilesList that were obtained within timeInterval (in seconds) of
+    the inputFileName. Use to find corresponding arcs, flats.
     
-    Returns fileName
+    Set timeInterval = None, to retrieve only the nearest file in time.
+    
+    Returns list of fileNames
     
     """
         
@@ -803,11 +837,20 @@ def findMatchingFileByTime(inputFileName, possibleFilesList):
         ctime=getCTimeFromHeader(f)
         ctimes.append(ctime)
     ctimes=np.array(ctimes)
-    
+        
     fileCTime=getCTimeFromHeader(inputFileName)
-    bestMatchIndex=np.where(abs(fileCTime-ctimes) == abs(fileCTime-ctimes).min())[0][0]
     
-    return possibleFilesList[bestMatchIndex]
+    tab=atpy.Table()
+    tab.add_column(atpy.Column(possibleFilesList, 'fileNames'))
+    tab.add_column(atpy.Column(abs(fileCTime-ctimes), 'dt'))
+    tab.sort('dt')
+    
+    if timeInterval is not None:
+        matchedList=tab['fileNames'][np.where(tab['dt'] < timeInterval)].tolist()
+    else:
+        matchedList=tab['fileNames'][np.where(tab['dt'] == tab['dt'].min())].tolist()
+    
+    return matchedList
 
 #-------------------------------------------------------------------------------------------------------------
 def detectLines(data, sigmaCut = 3.0, thresholdSigma = 2.0, featureMinPix = 30, numBins = 1):
