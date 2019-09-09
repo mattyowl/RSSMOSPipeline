@@ -416,7 +416,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
         # Object
         cutSlits(f, outFileName, slitsDict)
         # Arc
-        arcFileName=findMatchingFilesByTime(f, maskDict['ARC'])[0]
+        arcFileName=findMatchingFilesByTime(f, maskDict['ARC'], timeInterval = None)[0]
         cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
         cutSlits(arcFileName, cutArcFileName, slitsDict)
         maskDict['cutArcDict'][f]=cutArcFileName
@@ -489,7 +489,7 @@ def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0):
         # Object
         cutSlits(f, outFileName, slitsDict)
         # Arc
-        arcFileName=findMatchingFilesByTime(f, maskDict['ARC'])[0]
+        arcFileName=findMatchingFilesByTime(f, maskDict['ARC'], timeInterval = None)[0]
         cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
         cutSlits(arcFileName, cutArcFileName, slitsDict)
         maskDict['cutArcDict'][f]=cutArcFileName
