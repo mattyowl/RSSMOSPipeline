@@ -106,8 +106,9 @@ if __name__ == '__main__':
                 masksToReduce.append(key)
             else:
                 print("Skipping mask '%s' as no wavelength calibration reference model currently exists." % (key))
-                print("    Use rss_mos_create_arc_model to make a reference model and then re-run.")
-                print("    arc files list: %s" % (infoDict[key][maskKey]['ARC']))
+                if type(infoDict[key][maskKey]) == dict and 'ARC' in infoDict[key][maskKey].keys():
+                    print("    Use rss_mos_create_arc_model to make a reference model and then re-run.")
+                    print("    arc files list: %s" % (infoDict[key][maskKey]['ARC']))
             
     # We're organised by object name, reduce each in turn
     for maskName in masksToReduce:
