@@ -4,15 +4,17 @@
 
 import os
 import glob
-from distutils.core import setup
-from distutils.extension import Extension
+from setuptools import setup
+from setuptools import Extension
+#from distutils.core import setup
+#from distutils.extension import Extension
 #from Cython.Distutils import build_ext
 import numpy
 #import popen2
 
 setup(name='RSSMOSPipeline',
-      version="git",
-      url=None,
+      version="1.0.dev0",
+      url="https://github.com/mattyowl/RSSMOSPipeline",
       author='Matt Hilton',
       author_email='hiltonm@ukzn.ac.za',
       classifiers=[],
@@ -23,4 +25,8 @@ setup(name='RSSMOSPipeline',
       scripts=['bin/rss_mos_reducer', 'bin/rss_mos_create_arc_model', 'bin/rss_mos_inspect_arc_model'],
       #cmdclass={'build_ext': build_ext},
       #ext_modules=[Extension("nemoCython", ["nemo/nemoCython.pyx"], include_dirs=[numpy.get_include()])]
+      install_requires=["astropy >= 3.2",
+                        "numpy >= 1.10",
+                        "matplotlib >= 2.0",
+                        "scipy >= 1.0"]
 )

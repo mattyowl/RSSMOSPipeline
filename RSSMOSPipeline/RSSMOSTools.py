@@ -237,14 +237,14 @@ def getImageInfo(rawDir):
                                     grating=pImg[0].header['GRATING']
                                     lampid=pImg[0].header['LAMPID']
                                     modelFileName=REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle"
-                                if modelFileName not in infoDict[maskName][maskID]['modelFileNames'] and matchesSettings == True:
+                                if modelFileName not in infoDict[maskName][maskID]['modelFileNames'] and matchesSettings == True and lampid != "NONE":
                                     infoDict[maskName][maskID]['modelFileNames'].append(modelFileName)
                                     if os.path.exists(modelFileName) == True:
                                         infoDict[maskName][maskID]['modelExists'].append(True)
                                     else:
                                         infoDict[maskName][maskID]['modelExists'].append(False)                                    
                                     infoDict[maskName][maskID]['ARC'].append(p)
-
+    
     return infoDict
 
 #-------------------------------------------------------------------------------------------------------------
