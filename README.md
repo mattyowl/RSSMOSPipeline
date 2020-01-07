@@ -45,17 +45,24 @@ or 12 minutes with the non-iterative sky subtraction method.
 The pipeline is written in pure python (only 3.x is supported now). It needs the following modules to 
 be installed:
 
-* numpy (tested on 1.14.1)
-* scipy (tested on 0.17.0)
-* astropy (tested on 2.0.4)
-* matplotlib (tested on 2.1.0)
-* IPython (tested on 5.5.0)
+* numpy
+* scipy
+* astropy
+* matplotlib
+* IPython
 
-IPython is used for debugging, but isn't really needed to run the pipeline.
+IPython is used for debugging, but isn't really needed to run the pipeline. The install script (see 
+below) should install the needed modules automatically if they are not already on your system.
 
 ## Installation
 
-As root:
+From PyPI:
+
+```
+pip install RSSMOSPipeline
+```
+
+Or, as root, from the source code archive:
     
 ```
 sudo python setup.py install
@@ -71,7 +78,7 @@ Then add `$HOME/local/bin` to $PATH, and e.g., `$HOME/local/lib/python3.6/site-p
 
 ```
 export PATH=$HOME/local/bin:$PATH    
-export PYTHONPATH=$HOME/local/lib/python2.7/site-packages:$PYTHONPATH
+export PYTHONPATH=$HOME/local/lib/python3.6/site-packages:$PYTHONPATH
 ```
 
 Or, possibly:
