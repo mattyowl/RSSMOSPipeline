@@ -2150,7 +2150,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         # Quantify wavelength calibration accuracy using sky
         if sky.sum() > 0:
             medianOffset, numLines=checkWavelengthCalibUsingSky(sky, refWavelengths, featureMinPix = 5)
-            logger.info("... stackAndExtract - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines))
+            logger.info("stackAndExtract - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines))
             skyWavelengthCalibCheckList.append([extension, medianOffset, numLines])
         
         # Write 2d, sky subtracted combined spectrum
