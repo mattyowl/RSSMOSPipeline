@@ -16,6 +16,7 @@ the following grating/lamp/detector binning combinations:
 * pg1300 Ar (2x2 binning)
 * pg1300 Ar (1x2 binning)
 * pg1300 Ne (1x2 binning)
+* pg1300 Xe (1x2 binning)
 * pg1300 CuAr (2x2 binning)
 * pg1800 Ne (2x2 binning)
 
