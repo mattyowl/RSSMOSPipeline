@@ -25,8 +25,8 @@
 
 import os
 import sys
-import pyfits
-import atpy
+import astropy.io.fits as pyfits
+import astropy.table as atpy
 #from astLib import *
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,7 +36,6 @@ from scipy import optimize
 import argparse
 import pickle
 import IPython
-plt.matplotlib.interactive(True)
 
 #-------------------------------------------------------------------------------------------------------------
 def parseApproxArcCoordsFile(fileName):
@@ -98,13 +97,13 @@ def detectLines(data, sigmaCut = 3.0, thresholdSigma = 2.0, featureMinPix = 5):
     objAmplitudes_centreRow=np.array(objAmplitudes_centreRow).flatten()
     minPixMask=np.greater(objNumPix, featureMinPix)
     featureTable=atpy.Table()
-    featureTable.add_column('id', objIDs[minPixMask])
-    featureTable.add_column('x_centreRow', objPositions_centreRow[minPixMask])
+    featureTable['id']=objIDs[minPixMask]
+    featureTable['x_centreRow']=objPositions_centreRow[minPixMask]
     if data.ndim == 2:
-        featureTable.add_column('y_centreRow', [data.shape[0]/2]*len(featureTable))
-        featureTable.add_column('amplitude', data[data.shape[0]/2, np.array(np.round(featureTable['x_centreRow']), dtype = int)])
+        featureTable['y_centreRow']=[data.shape[0]/2]
+        featureTable['amplitude']=data[data.shape[0]/2, np.array(np.round(featureTable['x_centreRow']), dtype = int)]
     elif data.ndim == 1:
-        featureTable.add_column('amplitude', objAmplitudes_centreRow[minPixMask])
+        featureTable['amplitude']=objAmplitudes_centreRow[minPixMask]
 
     # Sanity check plot
     #plt.matplotlib.interactive(True)
@@ -133,7 +132,7 @@ def tagWavelengthFeatures(featureTable, approxCoordsDict, maxDiffPix = 10):
 
     # If we don't use maxDiffPix constraint, sometimes we can overwrite a correct line id with a wrong one
     # (this would happen if an undetected line had an entry for a wavelength)
-    featureTable.add_column('wavelength', np.zeros(len(featureTable)))
+    featureTable['wavelength']=np.zeros(len(featureTable))
     for x in approxCoordsDict.keys():
         wavelength=approxCoordsDict[x]
         diff=abs(x-featureTable['x_centreRow'])
@@ -141,7 +140,7 @@ def tagWavelengthFeatures(featureTable, approxCoordsDict, maxDiffPix = 10):
             rowNumber=np.argmin(diff)
             featureTable['wavelength'][rowNumber]=wavelength
     
-    featureTable=featureTable.where(featureTable['wavelength'] != 0)
+    featureTable=featureTable[np.where(featureTable['wavelength'] != 0)]
     
     return featureTable
 
@@ -160,15 +159,14 @@ def makeModelArcSpectrum(data, approxCoordsDict, outFileName, yRow, sigmaCut = 3
     
     # Save reference model as a pickled dictionary
     refModelDict={'featureTable': featureTable, 'arc_centreRow': data_centreRow}
-    pickleFile=file(outFileName, "wb")
-    pickler=pickle.Pickler(pickleFile)
-    pickler.dump(refModelDict)
-    pickleFile.close()
+    with open(outFileName, "wb") as pickleFile:
+        pickler=pickle.Pickler(pickleFile)
+        pickler.dump(refModelDict)
     
 #-------------------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser("inspectRefModel.py")
+    parser = argparse.ArgumentParser("rss_mos_inspect_arc_model")
     parser.add_argument("refModelFileName", help="The name of the RefModel_*.pickle file to inspect.")
 
     args = parser.parse_args()
@@ -176,10 +174,9 @@ if __name__ == '__main__':
     modelFileName=args.refModelFileName
     
     # Load reference model
-    pickleFile=file(modelFileName, "rb")
-    unpickler=pickle.Unpickler(pickleFile)
-    refModelDict=unpickler.load()
-    pickleFile.close()
+    with open(modelFileName, "rb") as pickleFile:
+        unpickler=pickle.Unpickler(pickleFile)
+        refModelDict=unpickler.load()
     
     arcData=refModelDict['arc_centreRow']
     xs=refModelDict['featureTable']['x_centreRow']
@@ -194,21 +191,6 @@ if __name__ == '__main__':
     wavelengthCalibPoly=np.poly1d(fitCoeffs)
     wavelengths=wavelengthCalibPoly(np.arange(arcData.shape[0]))
     
-    #plt.matplotlib.interactive(True)
-    plt.figure(figsize=(12, 8))
-    plt.plot(wavelengths, arcData, 'k-')
-    plt.plot(arcFeatureTable['wavelength'], arcFeatureTable['amplitude'], 'bo')
-    for row in arcFeatureTable:
-        plt.text(row['wavelength'], row['amplitude'], row['wavelength'])
-    plt.xlabel("Wavelength (Angstroms)")
-    plt.ylabel("Relative Flux")
-    plt.close()
-    
-    #IPython.embed()
-    #sys.exit()
-
-    #----
-    # Attempting to fiddle
     coordsFileName=modelFileName.replace("RefModel_", "").replace(".pickle", ".txt")
     approxCoordsDict=parseApproxArcCoordsFile(coordsFileName)
     
@@ -229,7 +211,6 @@ if __name__ == '__main__':
     arcFeatureTable=refModelDict['featureTable']
 
     # Not wavelength calibrated - is it tagged correctly?
-    plt.matplotlib.interactive(True)
     plt.figure(figsize=(12, 8))
     plt.plot(arcData, 'k-')
     plt.plot(arcFeatureTable['x_centreRow'], arcFeatureTable['amplitude'], 'bo')
@@ -237,54 +218,6 @@ if __name__ == '__main__':
         plt.text(row['x_centreRow'], row['amplitude'], row['wavelength'])
     plt.xlabel("x")
     plt.ylabel("Relative Flux")
-    
-    IPython.embed()
+    plt.show()
     sys.exit()
     
-    # This should match the method in rss_mos_reducer.py
-    # Really we should make a module to put all these routines in
-    order=2
-    fitCoeffs=np.polyfit(xs, wavelengths, order)
-
-    wavelengthCalibPoly=np.poly1d(fitCoeffs)
-    wavelengths=wavelengthCalibPoly(np.arange(arcData.shape[0]))
-    
-    # check plot
-    plt.plot(np.arange(arcData.shape[0]), wavelengths, 'k--')
-    plt.plot(arcFeatureTable['x_centreRow'], arcFeatureTable['wavelength'], 'r.')
-    plt.xlabel("x")
-    plt.ylabel("wavelength")
-    
-    #plt.matplotlib.interactive(True)
-    plt.figure(figsize=(12, 8))
-    plt.plot(wavelengths, arcData, 'k-')
-    plt.plot(arcFeatureTable['wavelength'], arcFeatureTable['amplitude'], 'bo')
-    for row in arcFeatureTable:
-        plt.text(row['wavelength'], row['amplitude'], row['wavelength'])
-    plt.xlabel("Wavelength (Angstroms)")
-    plt.ylabel("Relative Flux")
-    #plt.close()
-    # Save
-    pickleFile=file(outFileName, "wb")
-    pickler=pickle.Pickler(pickleFile)
-    pickler.dump(refModelDict)
-    pickleFile.close()
-    
-    #makeModelArcSpectrum(data, approxCoordsDict, modelFileName, row)
-    
-    #----
-    # Not wavelength calibrated
-    plt.matplotlib.interactive(True)
-    plt.figure(figsize=(12, 8))
-    plt.plot(arcData, 'k-')
-    plt.plot(arcFeatureTable['x_centreRow'], arcFeatureTable['amplitude'], 'bo')
-    for row in arcFeatureTable:
-        plt.text(row['x_centreRow'], row['amplitude'], row['wavelength'])
-    plt.xlabel("x")
-    plt.ylabel("Relative Flux")
-    
-    #plt.semilogy()
-    #plt.show()
-    #plt.savefig(diagnosticsDir+os.path.sep+"taggedFeatures_%s.png" % (diagnosticsLabel))
-    #plt.close()
-        
