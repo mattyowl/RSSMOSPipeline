@@ -672,12 +672,16 @@ def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------
-def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5):
+def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5,
+                    halfBlkSize = 100):
     """Finds object traces in longslit data, defines regions +/- skyRows around them, so we can treat in 
     the same way as MOS slitlets.
     
     objects are detected as peaks in the SNR profile across the slit. Use minTraceWidth to set the number
     of pixels in the SNR profile that must be above thresholdSigma for an object to be detected.
+    
+    halfBlkSize is used for measuring local background. This value is given in ubinned pixels and will be
+    adjusted accordingly according to binning in vertical direction along the detector CCDs.
     
     Returns a dictionary which can be fed into cutSlits
     
@@ -685,7 +689,7 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     
     with pyfits.open(objFileName) as img:
         d=img['SCI'].data
-        
+
     # Take out spectrum of flat lamp (approx)
     a=np.median(d, axis = 0)
     a=np.array([a]*d.shape[0])
@@ -697,7 +701,7 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     # Find local background, noise (running clipped mean)
     prof=np.median(d, axis = 1)    
     prof[np.less(prof, 0)]=0.
-    halfBlkSize=100 # was 50
+    halfBlkSize=int(halfBlkSize/img['SCI'].header['CDELT2']) # So input is in unbinned pixels
     sigmaCut=3.0        
     bck=np.zeros(prof.shape)
     sig=np.zeros(prof.shape)
