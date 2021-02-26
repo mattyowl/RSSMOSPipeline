@@ -672,12 +672,16 @@ def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------
-def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5):
+def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5,
+                    halfBlkSize = 100):
     """Finds object traces in longslit data, defines regions +/- skyRows around them, so we can treat in 
     the same way as MOS slitlets.
     
     objects are detected as peaks in the SNR profile across the slit. Use minTraceWidth to set the number
     of pixels in the SNR profile that must be above thresholdSigma for an object to be detected.
+    
+    halfBlkSize is used for measuring local background. This value is given in ubinned pixels and will be
+    adjusted accordingly according to binning in vertical direction along the detector CCDs.
     
     Returns a dictionary which can be fed into cutSlits
     
@@ -685,7 +689,7 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     
     with pyfits.open(objFileName) as img:
         d=img['SCI'].data
-        
+
     # Take out spectrum of flat lamp (approx)
     a=np.median(d, axis = 0)
     a=np.array([a]*d.shape[0])
@@ -697,7 +701,7 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     # Find local background, noise (running clipped mean)
     prof=np.median(d, axis = 1)    
     prof[np.less(prof, 0)]=0.
-    halfBlkSize=100 # was 50
+    halfBlkSize=int(halfBlkSize/img['SCI'].header['CDELT2']) # So input is in unbinned pixels
     sigmaCut=3.0        
     bck=np.zeros(prof.shape)
     sig=np.zeros(prof.shape)
@@ -1063,7 +1067,7 @@ def findScaleAndShift(arcRow, refModelDict, numScales = 101):
     # fftCorrelate
     data_x=np.arange(0, arcRowSegMap.shape[0])  
     corrMaxList=[]
-    scalesArr=np.linspace(-0.1, 0.1, numScales)
+    scalesArr=np.linspace(-0.2, 0.2, numScales)
     shiftsList=[]
     #overlapsList=[]
     for fftScale in scalesArr:
@@ -1117,7 +1121,7 @@ def selectBestRefModel(modelFileNameList, arcData, thresholdSigma = 2.0):
         # Replaced np.correlate with fft based correlation
         # Find shift and wavelength dependent scale change (stretch, then shift)
         arcRow=arcData[int(arcData.shape[0]/2)]
-        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, numScales = 11)
+        bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, numScales = 22)
         bestCorrMaxList.append(bestCorrMax)
         bestFitScaleList.append(bestFitScale)
         bestFitShiftList.append(bestFitShift)
@@ -1155,7 +1159,8 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # This is useful if e.g., we have some MOS slit which is way to the red/blue end of the detector
     # First select the model to use based on centre row only (saves much time)
     # Choose best from maximum cross correlation
-    modelFileNameList=glob.glob(modelFileName.split(".pickle")[0]+"*.pickle")
+    # NOTE: This now searches arcs with different spatial binning too
+    modelFileNameList=glob.glob(modelFileName.split(".pickle")[0][:-1]+"*.pickle")
     refModelDict, arcFeatureTable, arcSegMap=selectBestRefModel(modelFileNameList, arcData, 
                                                                 thresholdSigma = thresholdSigma)
     diagnosticDict['refModelFileName']=refModelDict['modelFileName']
@@ -1172,7 +1177,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     # This just affects which lines are cross-identified between the arc and the reference model
     yIndex=int(arcData.shape[0]/2)
     arcRow=arcData[yIndex]
-    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, numScales = 201)
+    bestCorrMax, bestFitScale, bestFitShift=findScaleAndShift(arcRow, refModelDict, numScales = 401)
     arc_centreRow=arcRow
     
     # Arc transform test plot
@@ -1423,14 +1428,22 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
         binning=img[0].header['CCDSUM'].replace(" ", "x")
         grating=img[0].header['GRATING']
         lampid=img[0].header['LAMPID']
-        modelFileName=REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle"
+        
+        # Now we don't care about spatial binning for finding arcs
+        binning=binning[:-1]+"?"
+        modelFileNames=glob.glob(REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle")
 
         if cutArcPath not in maskDict['wavelengthCalib'].keys():
             maskDict['wavelengthCalib'][cutArcPath]={}
             for extension in extensionsList:
                 logger.info("extension = %s" % (extension))
                 arcData=img[extension].data
-                if os.path.exists(modelFileName) == False:
+                foundModelFile=False
+                for modelFileName in modelFileNames:
+                    if os.path.exists(modelFileName) == True:
+                        foundModelFile=True
+                        break
+                if foundModelFile == False:
                     print("No reference model exists for grating %s, lamp %s, with binning %s." % (grating, lampid, binning))
                     print("Use rss_mos_create_arc_model to make a reference model and then re-run.")
                     print("arcFileName: %s" % (cutArcPath))
