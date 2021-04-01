@@ -1366,9 +1366,8 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
                     tck=interpolate.splrep(wavelengthsMap[y], data[y])
                     rectifiedData[y]=interpolate.splev(rectWavelengthsMap[y], tck, ext = 1)
                 except:
-                    print("WARNING: splrep error, this slit will be blank")
-                    IPython.embed()
-                    sys.exit()
+                    logger.warning("wavelength calibration/rectification error: this slit will be blank")
+                    break
             img[extension].data=rectifiedData
             header['CTYPE1']='LINEAR'
             header['DISPAXIS']=1
