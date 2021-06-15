@@ -126,9 +126,6 @@ if __name__ == '__main__':
             if addMask == True:
                 masksToReduce.append(key)
             else:
-                import IPython
-                IPython.embed()
-                sys.exit()
                 logger.warning("Skipping mask '%s' as no wavelength calibration reference model currently exists." % (key))
                 if type(infoDict[key][maskKey]) == dict and 'ARC' in infoDict[key][maskKey].keys():
                     logger.info("    Use rss_mos_create_arc_model to make a reference model and then re-run (after deleting %s)." % (rawDir+os.path.sep+"imageInfo.pkl"))
