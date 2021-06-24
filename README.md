@@ -63,6 +63,9 @@ From PyPI:
 pip install RSSMOSPipeline
 ```
 
+(note: if using, e.g., Ubuntu, then you would need to add `$HOME/.local/bin` to `$PATH`, as
+this is where scripts like `rss_mos_reducer` are installed).
+
 Or, as root, from the source code archive:
     
 ```
@@ -72,14 +75,14 @@ sudo python setup.py install
 Or, in your home directory:
     
 ```
-python setup.py install --prefix=$HOME/local
+python setup.py install --prefix=$HOME/.local
 ```
 
-Then add `$HOME/local/bin` to $PATH, and e.g., `$HOME/local/lib/python3.6/site-packages` to $PYTHONPATH.
+Then add `$HOME/.local/bin` to `$PATH`, and e.g., `$HOME/.local/lib/python3.6/site-packages` to $PYTHONPATH.
 
 ```
-export PATH=$HOME/local/bin:$PATH    
-export PYTHONPATH=$HOME/local/lib/python3.6/site-packages:$PYTHONPATH
+export PATH=$HOME/.local/bin:$PATH    
+export PYTHONPATH=$HOME/.local/lib/python3.6/site-packages:$PYTHONPATH
 ```
 
 Or, possibly:
