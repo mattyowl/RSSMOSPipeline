@@ -19,10 +19,11 @@ setup(name='RSSMOSPipeline',
       description='Pipeline for reducing both longslit and multi-object spectroscopic data from the Robert Stobie Spectrograph on SALT.',
       long_description="""Pipeline for reducing both longslit and multi-object spectroscopy from the Robert Stobie Spectrograph on SALT.""",
       packages=['RSSMOSPipeline'],
-      package_data={'RSSMOSPipeline': ['data/*', 'data/modelArcSpectra/*']},
-      scripts=['bin/rss_mos_reducer', 'bin/rss_mos_create_arc_model', 'bin/rss_mos_inspect_arc_model'],
+      package_data={'RSSMOSPipeline': ['data/*', 'data/modelArcSpectra/*', 'data/templateSpectra/*', 'data/templateSpectra/TremontiStarburstTemplate/*']},
+      scripts=['bin/rss_mos_reducer', 'bin/rss_mos_create_arc_model', 'bin/rss_mos_inspect_arc_model', 'bin/rss_mos_visual_inspector'],
       install_requires=["astropy >= 3.2",
                         "numpy >= 1.10",
                         "matplotlib >= 2.0",
-                        "scipy >= 1.0"]
+                        "scipy >= 1.0",
+                        "astLib >= 0.11.6"]
 )
