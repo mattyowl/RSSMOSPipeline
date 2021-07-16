@@ -1,0 +1,34 @@
+
+This directory contains the data products used in the paper "An Ultraviolet
+Spectroscopic Atlas of Local Starbursts and Star-Forming Galaxies: the Legacy
+of FOS and GHRS" by C. A. Tremonti, C. Leitherer, T. M. Heckman, and D.
+Calzetti.  (ApJ submitted, 2003)
+
+fos_ghrs_composite.txt -- a text file containing the composite spectrum 
+shown in Figure 1.  The spectra used in making the composite are in the 
+"corrected" directory described below.
+column 1: rest wavelength in Angstroms
+column 2: average flux of the rectified corrected spectra 
+column 3: median flux of the rectified corrected spectra 
+In constructing the composite regions of geocoronal emission were masked in
+the input spectra.  Note that the average spectrum contains some artifacts 
+in the 1600 A region due to the fact that some of the input spectra are very
+noisy in this region (where the FOS G130H and G190H gratings overlap.)
+
+
+The subdirectory "observed" contains the reduced FOS and GHRS spectra.
+The spectra have NOT been deredshifted or corrected for Milky Way
+reddening and absorption.  The files are in text format:
+column 1: observed wavelength in Angstroms
+column 2: observed flux in erg/s/cm^2/Angstrom
+column 3: rectified observed flux
+
+The subdirectory "corrected" contains spectra which have been de-redshifted,
+corrected for Milky Way extinction, and corrected for the Milky Way ISM
+absorption lines.  No correction has been made for geocoronal emission or
+for extinction internal to the star forming region.
+The files are in text format:
+column 1: restframe wavelength in Angstroms
+column 2: corrected flux in ergs/s/cm^2/Angstrom
+column 3: rectified corrected flux
+

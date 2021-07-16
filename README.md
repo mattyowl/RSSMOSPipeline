@@ -169,6 +169,24 @@ python setup.py install --user
     The 2d spectra are `.fits` images, which can be examined with DS9. They include the wavelength
     solution as the WCS stored in the header.
 
+5.  The `rss_mos_visual_inspector` tool can be used to look at the 1D spectra, compare to template
+    spectra from SDSS, and measure redshifts. Run this using, e.g.,
+
+    ```
+    rss_mos_visual_inspector 1DSpec_2DSpec_stackAndExtract/1D_*.fits results
+    ```
+
+    In this example, each spectrum will be displayed in turn, and a text file containing the results
+    of redshift measurements (and any comments by the user) will be written in the `results/`
+    directory, together with a plot of each spectrum. These are recorded from the state when the user
+    clicks the `Done - show next` button in the top right of the graphical user interface. Hopefully
+    it should be fairly obvious how to use most of the plotting controls. Note that you must click
+    `Redraw plot` after making changes to either the template redshift or spectral smoothing.
+    
+    Note that the `XC Galaxies`, `XC LRGs` and `XC QSOs` buttons will not work unless you have IRAF
+    and PyRAF installed (and even then the canned settings may not work well on all setups).
+
+
 ## Longslit mode
 The pipeline can also run on longslit data. The code detects object traces in each science frame,
 and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
