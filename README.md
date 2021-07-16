@@ -136,7 +136,7 @@ python setup.py install --user
     and `-i`, which switches on the iterative sky subtraction method for the spectral extraction.
     This currently seems to work better than the default extraction method, but is slower.
 
-4.  After the pipeline has finished, you will find data at various stages of reduction under the `reducedData` 
+3.  After the pipeline has finished, you will find data at various stages of reduction under the `reducedData` 
     dir (`reduced` for the above example). At the moment, this is not cleaned up.
 
     Two methods are used for extracting spectra:
@@ -169,7 +169,7 @@ python setup.py install --user
     The 2d spectra are `.fits` images, which can be examined with DS9. They include the wavelength
     solution as the WCS stored in the header.
 
-5.  The `rss_mos_visual_inspector` tool can be used to look at the 1D spectra, compare to template
+4.  The `rss_mos_visual_inspector` tool can be used to look at the 1D spectra, compare to template
     spectra from SDSS, and measure redshifts. Run this using, e.g.,
 
     ```
