@@ -1702,7 +1702,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
         t1=time.time()
         if k > 0:
             diff=np.sum((signalArr[k]-signalArr[k-1])**2)
-            logger.info("iteration %d ( diff = " % (k), diff, "time taken = %.3f sec" % (t1-t0), ")")
+            logger.info("iteration %d (diff = %.3e, time taken = %.3f sec)" % (k, diff, t1-t0))
         k=k+1
         # Keep track of sky, we don't want to report just the residual
         skyTotal=skyTotal+subFrac*sky

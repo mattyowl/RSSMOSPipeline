@@ -170,7 +170,8 @@ python setup.py install --user
     solution as the WCS stored in the header.
 
 4.  The `rss_mos_visual_inspector` tool can be used to look at the 1D spectra, compare to template
-    spectra from SDSS, and measure redshifts. This needs the `tkinter` module to be installed.
+    spectra from SDSS, and measure redshifts. This needs the `tkinter` module to be installed, and
+    for the `matplotlib` backend to be set to `TkAgg`.
 
     Run this using, e.g.,
 
