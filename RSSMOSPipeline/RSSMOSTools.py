@@ -751,24 +751,40 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------
-def makeChipGapMask(data):
+def makeChipGapMask(data, numGaps = 2, thresholdValue = 1e-3):
     """Given an image array (data), find and mask the chip gaps.
     
     Returns a mask where 1 = chip gap, 0 otherwise.
     
     """
     
-    lowMaskValue=2.0
-    minPix=1000
-    chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
+    # This has to work with any image - flats or background subtracted object spectra
+    lowMaskValue=thresholdValue
+    med=np.median(data, axis = 0)
+    chipGapMask=np.array(np.less(abs(med), lowMaskValue), dtype = float)  # flags chip gaps as noise
     segmentationMap, numObjects=ndimage.label(chipGapMask)
     sigPixMask=np.equal(chipGapMask, 1)
     objIDs=np.unique(segmentationMap)
     if len(objIDs) > 0:
         objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
-        for objID, nPix in zip(objIDs, objNumPix):    
-            if nPix < minPix:
-                chipGapMask[np.equal(segmentationMap, objID)]=0.0
+        newChipGapMask=np.zeros(med.shape)
+        for i in range(numGaps):
+            newChipGapMask[segmentationMap == objIDs[np.argmax(objNumPix)]]=1
+            objNumPix[np.argmax(objNumPix)]=0
+    chipGapMask=np.array([newChipGapMask]*data.shape[0])
+
+    # Old
+    # lowMaskValue=2.0
+    # minPix=1000
+    # chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
+    # segmentationMap, numObjects=ndimage.label(chipGapMask)
+    # sigPixMask=np.equal(chipGapMask, 1)
+    # objIDs=np.unique(segmentationMap)
+    # if len(objIDs) > 0:
+    #     objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+    #     for objID, nPix in zip(objIDs, objNumPix):
+    #         if nPix < minPix:
+    #             chipGapMask[np.equal(segmentationMap, objID)]=0.0
     
     return chipGapMask
 
@@ -796,8 +812,9 @@ def applyFlatField(maskDict, outDir):
             med=np.median(flatfield, axis = 0)
                         
             # Find the chip gaps and make a mask
-            chipGapMask=makeChipGapMask(data)
-            # Invert it as we want weights
+            chipGapMask=makeChipGapMask(flatfield, thresholdValue = 2)
+
+            # Invert it as we want weights for interpolator
             gapsMask=np.equal(np.median(chipGapMask, axis = 0), False)
             
             # Fit and remove spectrum of flat lamp
@@ -809,19 +826,38 @@ def applyFlatField(maskDict, outDir):
             #plt.matplotlib.interactive(True)
             #plt.plot(x, med)
             #plt.plot(x, poly(x))
+
+            # Bit of extra masking - sudden changes in gradient
+            # (could be around chip gaps, or at edges)
+            # grad=np.gradient(med*gapsMask)
+            # gapsMask=gapsMask*(abs(grad) < 500)
+
+            # Extrapolate (rather than set to zero) on left/right edges
+            # (keeps spline well behaved near edges)
+            testSum=0
+            for i in range(1, len(med)):
+                testSum=testSum+med[-i]
+                if testSum > 0:
+                    med[-i:]=med[-i]
+                    break
             
             # Spline fit - fall back to smaller number of knots if some problem
             # If this fails, it should be caught in the rss_mos_reducer script
-            knotsToTry=[40, 20]
+            # Don't want too many knots - trying to bridge the chip gaps
+            knotsToTry=[80, 40, 20]
             for numKnots in knotsToTry:
                 x=np.arange(len(med))
                 spacing=x.max()/numKnots
-                w=gapsMask
+                w=gapsMask # weights are normally 1/stdev
                 t=np.linspace(spacing, x.max()-spacing, numKnots-2)
-                tck=interpolate.splrep(x, med, w = w, t = t, s = 2)
+                tck=interpolate.splrep(x, med, w = w, t = t, s = 0)
                 if np.any(np.isnan(tck[1])) == True:
                     logger.warning('spline fit to flatfield contains NaNs - trying lower number of knots')
                     continue
+                else:
+                    break
+            if np.any(np.isnan(tck[1])) == True:
+                raise Exception("Making flat field model failed - NaNs in the spline fit.")
             mod=np.array([interpolate.splev(x, tck)]*data.shape[0])
             flatfield=flatfield/mod
             #plt.matplotlib.interactive(True)
@@ -1561,7 +1597,7 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     return prof
     
 #-------------------------------------------------------------------------------------------------------------
-def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runningProfile = None,
+def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runningProfile = None, \
                                 iterateProfile = False, throwAwayRows = 2):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This is somewhat similar to the Horne optimal extraction algorithm. We solve:
@@ -1728,7 +1764,7 @@ def identifySky(data):
     return skyMask2d
 
 #-------------------------------------------------------------------------------------------------------------
-def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0,
+def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0, \
                        throwAwayRows = 2):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This was (supposed) to be similar to the Horne optimal extraction. We solve:
@@ -2001,7 +2037,6 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         headersList=[]
         CRMaskedDataCube=[]
         for fileName in toStackList:
-            
             img=pyfits.open(fileName)
             foundExtension=False
             try:
@@ -2017,7 +2052,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                 logger.info("%s" % (fileName))
                 
                 header=img[extension].header
-                
+
                 # Extract calibrated wavelength scale, assuming left most pixel corresponds to CRVAL1
                 # NOTE: if this fails due to missing CDELT1, it probably means the slit we found is a wacky shape - check the .reg file                   
                 w=np.arange(data.shape[1])*header['CDELT1']+header['CRVAL1']
