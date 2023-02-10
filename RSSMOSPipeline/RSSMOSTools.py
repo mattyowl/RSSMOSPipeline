@@ -673,8 +673,8 @@ def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
     return slitsDict
 
 #-------------------------------------------------------------------------------------------------------------
-def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5,
-                    halfBlkSize = 100):
+def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSigma = 3., minTraceWidth = 5,\
+                    halfBlkSize = 100, filterPix = 50, maskEdgePix = 250):
     """Finds object traces in longslit data, defines regions +/- skyRows around them, so we can treat in 
     the same way as MOS slitlets.
     
@@ -684,12 +684,22 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     halfBlkSize is used for measuring local background. This value is given in ubinned pixels and will be
     adjusted accordingly according to binning in vertical direction along the detector CCDs.
     
+    filterPix is used for filtering out large scale gradient in the profile in the spatial direction.
+    Given in unbinned pixels.
+
+    maskEdgePix is used to throw out the edges (top and bottom in spatial direction) which are useless.
+    Given in unbinned pixels.
+
     Returns a dictionary which can be fed into cutSlits
     
     """ 
     
     with pyfits.open(objFileName) as img:
         d=img['SCI'].data
+
+    halfBlkSize=int(halfBlkSize/img['SCI'].header['CDELT2']) # So input is in unbinned pixels
+    filterPix=int(filterPix/img['SCI'].header['CDELT2'])
+    maskEdgePix=int(maskEdgePix/img['SCI'].header['CDELT2'])
 
     # Take out spectrum of flat lamp (approx)
     a=np.median(d, axis = 0)
@@ -699,32 +709,56 @@ def findPseudoSlits(objFileName, skyRows = 20, minSlitHeight = 10., thresholdSig
     d[nonZeroMask]=d[nonZeroMask]/a[nonZeroMask]
     d[zeroMask]=0.
     
-    # Find local background, noise (running clipped mean)
-    prof=np.median(d, axis = 1)    
+    # Profile may not be flattened anyway due to diff illumination - filter it to flatten gradient
+    prof=np.median(d, axis = 1)
+    unfiltered=prof
     prof[np.less(prof, 0)]=0.
-    halfBlkSize=int(halfBlkSize/img['SCI'].header['CDELT2']) # So input is in unbinned pixels
-    sigmaCut=3.0        
-    bck=np.zeros(prof.shape)
-    sig=np.zeros(prof.shape)
-    for y in range(prof.shape[0]):
-        yMin=y-halfBlkSize
-        yMax=y+halfBlkSize
-        if yMin < 0:
-            yMin=0
-        if yMax > prof.shape[0]-1:
-            yMax=prof.shape[0]-1
-        mean=0
-        sigma=1e6
-        for i in range(20):
-            nonZeroMask=np.not_equal(prof[yMin:yMax], 0)
-            mask=np.less(abs(prof[yMin:yMax]-mean), sigmaCut*sigma)
-            mean=np.mean(prof[yMin:yMax][mask])
-            sigma=np.std(prof[yMin:yMax][mask]-mean)            
-        bck[y]=mean
-        sig[y]=sigma
+    gBig=ndimage.gaussian_filter1d(prof, filterPix)
+    prof=prof-gBig
+    # prof[np.less(prof, 0)]=0.
+    prof[:maskEdgePix]=0
+    prof[-maskEdgePix:]=0
+
+    # Old ----
+    # # Find local background, noise (running clipped mean)
+    # prof=np.median(d, axis = 1)
+    # prof[np.less(prof, 0)]=0.
+    # sigmaCut=3.0
+    # bck=np.zeros(prof.shape)
+    # sig=np.zeros(prof.shape)
+    # for y in range(prof.shape[0]):
+    #     yMin=y-halfBlkSize
+    #     yMax=y+halfBlkSize
+    #     if yMin < 0:
+    #         yMin=0
+    #     if yMax > prof.shape[0]-1:
+    #         yMax=prof.shape[0]-1
+    #     mean=0
+    #     sigma=1e6
+    #     for i in range(20):
+    #         nonZeroMask=np.not_equal(prof[yMin:yMax], 0)
+    #         mask=np.less(abs(prof[yMin:yMax]-mean), sigmaCut*sigma)
+    #         mean=np.mean(prof[yMin:yMax][mask])
+    #         sigma=np.std(prof[yMin:yMax][mask]-mean)
+    #     bck[y]=mean
+    #     sig[y]=sigma
+    # Old ^^^^
+
+    # Estimate noise in filtered profile (ignoring that pixels are correlated etc.)
+    sigmaCut=3.0
+    sigma=1e6
+    mean=0
+    for i in range(20):
+        mask=np.less(abs(prof-mean), sigmaCut*sigma)
+        mean=np.mean(prof[mask])
+        sigma=np.std(prof[mask])
+    bck=0
+    sig=sigma
    
     # Detect peaks
     profSNR=(prof-bck)/sig    
+    profSNR[:maskEdgePix]=0
+    profSNR[-maskEdgePix:]=0
     mask=np.greater(profSNR, thresholdSigma)    
     segmentationMap, numObjects=ndimage.label(mask)
     sigPixMask=np.equal(mask, 1)
