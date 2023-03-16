@@ -39,6 +39,7 @@ import pickle
 import logging
 import RSSMOSPipeline
 import IPython
+from astropy.table import Table
 #plt.matplotlib.interactive(True)
 
 #-------------------------------------------------------------------------------------------------------------
@@ -366,53 +367,69 @@ def writeDS9SlitRegions(regFileName, slitsDict, imageFileName):
     outFile.close()        
     
 #-------------------------------------------------------------------------------------------------------------
-def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
+def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = False, noFlat = False):
     """Cuts files into slitlets, making MEF files. 
             
     threshold is the parameter used by findSlits
     
     """
 
-    # We find slits using master flats, and store slit locations in a dictionary indexed by masterFlatPath
-    # We have a routine to pull out a corresponding master flat (and hence slitsDict) for every image.
     maskDict['slitsDicts']={}
-    for i in range(len(maskDict['masterFlats'])):
-        masterFlatPath=maskDict['masterFlats'][i]
-        cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
-        slitsDict=findSlits(masterFlatPath, threshold = threshold)
+
+    # If specified, creates slits based on input locations. Also skips flat fielding.
+    if slitFileName and noFlat:
+        masterFlatPath = 'noflat'
+        slitsDict=slitsFromFile(slitFileName)
         maskDict['slitsDicts'][masterFlatPath]=slitsDict
 
-    # To avoid problems with occasional missing slits (if we treat each flat separately), use
-    # the slits found from the first flat as a reference, and find the y-shifts between them
-    refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
-    img=pyfits.open(maskDict['masterFlats'][0])
-    height=img[1].data.shape[0]
-    ref=np.zeros(height)
-    for key in refDict.keys():
-        ref[int(round(refDict[key]['yCentre']))]=1
-    shiftsDict={}
-    for key in maskDict['slitsDicts'].keys():
-        if key != maskDict['masterFlats'][0]:
-            slitsDict=maskDict['slitsDicts'][key]
-            g=np.zeros(height)
-            for skey in slitsDict.keys():
-                g[int(round(slitsDict[skey]['yCentre']))]=1
-            corr, corrMax, shift=fftCorrelate(ref, g)
-            shiftsDict[key]=shift
-        else:
-            shiftsDict[key]=0.
+    # If specified, creates slits based on input locations. Does not skip flat fielding.
+    elif slitFileName and noFlat != True:
+        for i in range(len(maskDict['masterFlats'])):
+            masterFlatPath=maskDict['masterFlats'][i]
+            cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
+            slitsDict=slitsFromFile(slitFileName)
+            maskDict['slitsDicts'][masterFlatPath]=slitsDict
 
-    # Remake all slits dictionaries, based on reference minus shift
-    newSlitsDicts={}
-    for i in range(len(maskDict['masterFlats'])):
-        objPath=maskDict['masterFlats'][i]
-        newSlitsDicts[objPath]={}
-        for key in refDict:
-            newSlitsDicts[objPath][key]={}
-            newSlitsDicts[objPath][key]['yMin']=refDict[key]['yMin']-int(round(shiftsDict[objPath]))
-            newSlitsDicts[objPath][key]['yMax']=refDict[key]['yMax']-int(round(shiftsDict[objPath]))
-    maskDict['slitsDicts']=newSlitsDicts
-    
+    # We find slits using master flats, and store slit locations in a dictionary indexed by masterFlatPath
+    # We have a routine to pull out a corresponding master flat (and hence slitsDict) for every image.
+    else:
+        for i in range(len(maskDict['masterFlats'])):
+            masterFlatPath=maskDict['masterFlats'][i]
+            cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
+            slitsDict=findSlits(masterFlatPath, threshold = threshold)
+            maskDict['slitsDicts'][masterFlatPath]=slitsDict
+
+        # To avoid problems with occasional missing slits (if we treat each flat separately), use
+        # the slits found from the first flat as a reference, and find the y-shifts between them
+        refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
+        img=pyfits.open(maskDict['masterFlats'][0])
+        height=img[1].data.shape[0]
+        ref=np.zeros(height)
+        for key in refDict.keys():
+            ref[int(round(refDict[key]['yCentre']))]=1
+        shiftsDict={}
+        for key in maskDict['slitsDicts'].keys():
+            if key != maskDict['masterFlats'][0]:
+                slitsDict=maskDict['slitsDicts'][key]
+                g=np.zeros(height)
+                for skey in slitsDict.keys():
+                    g[int(round(slitsDict[skey]['yCentre']))]=1
+                corr, corrMax, shift=fftCorrelate(ref, g)
+                shiftsDict[key]=shift
+            else:
+                shiftsDict[key]=0.
+
+        # Remake all slits dictionaries, based on reference minus shift
+        newSlitsDicts={}
+        for i in range(len(maskDict['masterFlats'])):
+            objPath=maskDict['masterFlats'][i]
+            newSlitsDicts[objPath]={}
+            for key in refDict:
+                newSlitsDicts[objPath][key]={}
+                newSlitsDicts[objPath][key]['yMin']=refDict[key]['yMin']-int(round(shiftsDict[objPath]))
+                newSlitsDicts[objPath][key]['yMax']=refDict[key]['yMax']-int(round(shiftsDict[objPath]))
+        maskDict['slitsDicts']=newSlitsDicts
+        
     # ^^^ Tidy all the above up later
         
     # Cut arcs, matched here with appropriate object frames
@@ -422,10 +439,18 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
     maskDict['cutFlatDict']={}
     maskDict['cutArcDict']={}
     for f, outFileName in zip(toCutList, outCutList):
-        flatFileName=findMatchingFilesByTime(f, maskDict['masterFlats'], timeInterval = None)[0]
-        slitsDict=maskDict['slitsDicts'][flatFileName]
-        logger.info("cutting %s (and arcs, flats) using %s for slit definition ..." % (f, flatFileName))
-        label=os.path.split(flatFileName)[-1].replace(".fits", "")
+        if noFlat == False:
+            flatFileName=findMatchingFilesByTime(f, maskDict['masterFlats'], timeInterval = None)[0]
+            slitsDict=maskDict['slitsDicts'][flatFileName]
+            logger.info("cutting %s (and arcs, flats) using %s for slit definition ..." % (f, flatFileName))
+            label=os.path.split(flatFileName)[-1].replace(".fits", "")
+            # Flat
+            cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
+            cutSlits(flatFileName, cutFlatFileName, slitsDict)
+            maskDict['cutFlatDict'][f]=cutFlatFileName
+        else:
+            label='masterFlat_0'
+            flatFileName = 'masterFlat_0'
         # Object
         cutSlits(f, outFileName, slitsDict)
         # Arc
@@ -433,10 +458,6 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1):
         cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
         cutSlits(arcFileName, cutArcFileName, slitsDict)
         maskDict['cutArcDict'][f]=cutArcFileName
-        # Flat
-        cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
-        cutSlits(flatFileName, cutFlatFileName, slitsDict)
-        maskDict['cutFlatDict'][f]=cutFlatFileName
         # DS9 regions
         regFileName=flatFileName.replace(".fits", "_slitLocations.reg")
         writeDS9SlitRegions(regFileName, slitsDict, f)
@@ -548,6 +569,18 @@ def cutSlits(inFileName, outFileName, slitsDict):
         
     newImg.writeto(outFileName)
     newImg.close()
+
+#-------------------------------------------------------------------------------------------------------------
+def slitsFromFile(slitFileName):
+    '''
+    Creates dictionary that defines slits, using definitions from a file.
+    File has 3 columns: slitno, ystart, and yend
+    '''
+    dat = Table.read(slitFileName,format='ascii')
+    slitsDict = {}
+    for row in dat:
+        slitsDict[row['slitno']] = {'yMin':row['ystart'],'yMax':row['yend'],'yCentre': (row['ystart']+row['yend'])/2.}
+    return slitsDict
     
 #-------------------------------------------------------------------------------------------------------------
 def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
