@@ -189,6 +189,24 @@ python setup.py install --user
     Note that the `XC Galaxies`, `XC LRGs` and `XC QSOs` buttons will not work unless you have IRAF
     and PyRAF installed (and even then the canned settings may not work well on all setups).
 
+## Additional flags
+
+### Manual Slit Locations
+If you know the position of the slits in the fits file, you can specify them in an ascii file that will be read 
+in using astropy Tables and used to extract slits from the data. To do this, you can do this using the `-F`
+argument, e.g.,
+
+```
+rss_mos_reducer -F slit_loc.txt product reduced all
+```
+
+This ignorees the automated slit finding routine and uses the input location. Be sure to structure the slit
+location files with three columns: `slitno` (i.e. slit number), `ystart` (i.e. y-coord coinciding with beginning
+of slit), `yend` (i.e. y-coord coinciding with end of slit).
+
+### No Flats? No Problem!
+If you don't have flat fields for your observations, skip flat fielding altogether with the `-n` argument. To do
+this, you *must* also specify the location of your slits using the `-F` argument (see above).
 
 ## Longslit mode
 The pipeline can also run on longslit data. The code detects object traces in each science frame,
