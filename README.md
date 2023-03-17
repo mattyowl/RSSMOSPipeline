@@ -1,6 +1,12 @@
 # RSSMOSPipeline
 Pipeline for reducing both longslit and multi-object spectroscopy from the Robert Stobie Spectrograph
-on SALT.
+on [SALT](https://www.salt.ac.za/).
+
+* **Documentation**: Link to be added
+* **License**: [GPL v3](https://github.com/simonsobs/n/blob/main/LICENSE)
+* **Authors**: Matt Hilton, Melissa Moris
+* **Installation**: `pip install RSSMOSPipeline`
+* **Support**: Please use the [GitHub issues page](https://github.com/mattyowl/RSSMOSPipeline/issues), or contact [Matt Hilton](mailto:matt.hilton@wits.ac.za)
 
 Please note this software is under development at the moment, and the instructions in this 
 README file may not always be up to date.
@@ -42,7 +48,6 @@ The pipeline has not yet been optimised for speed. On an Intel Core i5-3320M (2.
 or 12 minutes with the non-iterative sky subtraction method.
 
 ## Software needed
-
 The pipeline is written in pure python (only 3.x is supported now). It needs the following modules to 
 be installed:
 
@@ -56,7 +61,6 @@ IPython is used for debugging, but isn't really needed to run the pipeline. The 
 below) should install the needed modules automatically if they are not already on your system.
 
 ## Installation
-
 From PyPI:
 
 ```
@@ -189,9 +193,14 @@ python setup.py install --user
     Note that the `XC Galaxies`, `XC LRGs` and `XC QSOs` buttons will not work unless you have IRAF
     and PyRAF installed (and even then the canned settings may not work well on all setups).
 
+## Longslit mode
+The pipeline can also run on longslit data. The code detects object traces in each science frame,
+and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
+for MOS data. If necessary, you can use the --longslit-threshold option to change the detection threshold used.
+
 ## Additional flags
 
-### Manual Slit Locations
+### Manual slit locations
 If you know the position of the slits in the fits file, you can specify them in an ascii file that will be read 
 in using astropy Tables and used to extract slits from the data. To do this, you can do this using the `-F`
 argument, e.g.,
@@ -204,20 +213,13 @@ This ignorees the automated slit finding routine and uses the input location. Be
 location files with three columns: `slitno` (i.e. slit number), `ystart` (i.e. y-coord coinciding with beginning
 of slit), `yend` (i.e. y-coord coinciding with end of slit).
 
-### No Flats? No Problem!
-If you don't have flat fields for your observations, skip flat fielding altogether with the `-n` argument. To do
+### No flats? No problem!
+If you don't have flat fields for your observations, you can skip flat fielding altogether with the `-n` argument. To do
 this, you *must* also specify the location of your slits using the `-F` argument (see above).
 
-## Longslit mode
-The pipeline can also run on longslit data. The code detects object traces in each science frame,
-and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
-for MOS data. If necessary, you can use the --longslit-threshold option to change the detection threshold used.
-
 ## Things which can/should be improved/added
-* extraction (not optimal at the moment)
-* spectrophotometric calibration using a standard (not implemented)
+* Extraction (not optimal at the moment)
+* Spectrophotometric calibration using a standard (not implemented)
 
 ## Comments, bug reports, help, suggestions etc..
-Please contact Matt Hilton <hiltonm@ukzn.ac.za>. I am happy to tweak this to work with as many
-gratings combinations as needed, but will need data to work with (and time).
-
+Please contact [Matt Hilton](mailto:matt.hilton@wits.ac.za), or [open an issue on GitHub](https://github.com/mattyowl/RSSMOSPipeline/issues).
