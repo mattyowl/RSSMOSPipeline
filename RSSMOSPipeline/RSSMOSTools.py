@@ -404,13 +404,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = False, noF
 
         # To avoid problems with occasional missing slits (if we treat each flat separately), use
         # the slits found from the first flat as a reference, and find the y-shifts between them
-        try:
-            refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
-        except:
-            print("huh")
-            import IPython
-            IPython.embed()
-            sys.exit()
+        refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
         img=pyfits.open(maskDict['masterFlats'][0])
         height=img[1].data.shape[0]
         ref=np.zeros(height)
