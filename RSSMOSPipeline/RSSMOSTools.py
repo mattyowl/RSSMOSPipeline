@@ -374,6 +374,9 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = False, noF
     
     """
 
+    if len(maskDict['masterFlats']) == 0:
+        raise Exception("No flat field through the slit mask is provided, so slit locations cannot be found - you will need to re-run using the -n and -F switches (use rss_mos_reducer -h to get help on the different options).")
+
     maskDict['slitsDicts']={}
 
     # If specified, creates slits based on input locations. Also skips flat fielding.
@@ -401,7 +404,13 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = False, noF
 
         # To avoid problems with occasional missing slits (if we treat each flat separately), use
         # the slits found from the first flat as a reference, and find the y-shifts between them
-        refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
+        try:
+            refDict=maskDict['slitsDicts'][maskDict['masterFlats'][0]]
+        except:
+            print("huh")
+            import IPython
+            IPython.embed()
+            sys.exit()
         img=pyfits.open(maskDict['masterFlats'][0])
         height=img[1].data.shape[0]
         ref=np.zeros(height)
