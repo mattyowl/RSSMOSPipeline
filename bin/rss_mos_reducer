@@ -155,6 +155,7 @@ if __name__ == '__main__':
         
         RSSMOSTools.makeMasterFlats(maskDict, outDir)
 
+        logger.info('maskType: %s' % (maskType))
         if maskType == 'MOS':
             RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold)
         elif maskType == 'MOS' and args.slitFileName != False:
