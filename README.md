@@ -209,7 +209,7 @@ argument, e.g.,
 rss_mos_reducer -F slit_loc.txt product reduced all
 ```
 
-This ignorees the automated slit finding routine and uses the input location. Be sure to structure the slit
+This ignores the automated slit finding routine and uses the input location. Be sure to structure the slit
 location files with three columns: `slitno` (i.e. slit number), `ystart` (i.e. y-coord coinciding with beginning
 of slit), `yend` (i.e. y-coord coinciding with end of slit).
 
