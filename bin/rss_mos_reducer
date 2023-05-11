@@ -157,9 +157,9 @@ if __name__ == '__main__':
 
         logger.info('maskType: %s' % (maskType))
         if maskType == 'MOS':
-            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold)
+            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold, noFlat= args.noFlat)
         elif maskType == 'MOS' and args.slitFileName != False:
-            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, slitFileName = args.slitFileName)
+            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, slitFileName = args.slitFileName, noFlat= args.noFlat)
         elif maskType == 'LONGSLIT':
             RSSMOSTools.cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = longslitThreshold)
         
