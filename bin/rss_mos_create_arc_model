@@ -38,7 +38,7 @@ from scipy import interpolate
 from scipy import optimize
 import argparse
 import pickle
-import IPython
+# import IPython
 #plt.matplotlib.interactive(True)
 
 #-------------------------------------------------------------------------------------------------------------
