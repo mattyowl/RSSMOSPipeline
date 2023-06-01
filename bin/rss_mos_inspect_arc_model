@@ -162,14 +162,20 @@ def makeModelArcSpectrum(data, approxCoordsDict, outFileName, yRow, sigmaCut = 3
     with open(outFileName, "wb") as pickleFile:
         pickler=pickle.Pickler(pickleFile)
         pickler.dump(refModelDict)
-    
+
 #-------------------------------------------------------------------------------------------------------------
-if __name__ == '__main__':
+def makeParser():
 
     parser = argparse.ArgumentParser("rss_mos_inspect_arc_model")
     parser.add_argument("refModelFileName", help="The name of the RefModel_*.pickle file to inspect.")
 
-    args = parser.parse_args()
+    return parser
+
+#-------------------------------------------------------------------------------------------------------------
+if __name__ == '__main__':
+
+    parser=makeParser()
+    args=parser.parse_args()
 
     modelFileName=args.refModelFileName
     
