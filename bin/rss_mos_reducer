@@ -50,7 +50,7 @@ if __name__ == '__main__':
     parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
     parser.add_argument("-s", "--slits", dest="extensionsList", default="all", help="Reduce the data corresponding to the given slit names only. Separate slit names with , but no spaces (e.g., -s SLIT9,SLIT15).")
     parser.add_argument("-S", "--skip-done", dest="skipDone", default=False, action='store_true', help="Skip previously processed masks, for which output already exists.")
-    parser.add_argument("-F", "--slit-file", dest="slitFileName", default=False, action='store', help="Specifies a file from which to read slit locations instead of autmatically finding them.")
+    parser.add_argument("-F", "--slit-file", dest="slitFileName", default=None, help="Specifies a plain text file from which to read slit locations instead of autmatically finding them (3 column format, where the first line must be the heading: 'slitno  ystart  yend', subsequent lines give slit number and rows defining the slit e.g., '10 988 1026').")
     parser.add_argument("-n", "--no-flat", dest="noFlat", default=False, action='store_true', help="If no flats, skips flag fielding. Likely will need to be run with -F.")
 
     args = parser.parse_args()
@@ -157,9 +157,7 @@ if __name__ == '__main__':
 
         logger.info('maskType: %s' % (maskType))
         if maskType == 'MOS':
-            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold)
-        elif maskType == 'MOS' and args.slitFileName != False:
-            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, slitFileName = args.slitFileName)
+            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold, slitFileName = args.slitFileName)
         elif maskType == 'LONGSLIT':
             RSSMOSTools.cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = longslitThreshold)
         

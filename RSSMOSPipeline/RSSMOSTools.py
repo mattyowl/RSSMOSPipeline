@@ -367,7 +367,7 @@ def writeDS9SlitRegions(regFileName, slitsDict, imageFileName):
     outFile.close()        
     
 #-------------------------------------------------------------------------------------------------------------
-def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = False, noFlat = False):
+def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = None, noFlat = False):
     """Cuts files into slitlets, making MEF files. 
             
     threshold is the parameter used by findSlits
@@ -380,13 +380,13 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = False, noF
     maskDict['slitsDicts']={}
 
     # If specified, creates slits based on input locations. Also skips flat fielding.
-    if slitFileName and noFlat:
+    if slitFileName is not None and noFlat:
         masterFlatPath = 'noflat'
         slitsDict=slitsFromFile(slitFileName)
         maskDict['slitsDicts'][masterFlatPath]=slitsDict
 
     # If specified, creates slits based on input locations. Does not skip flat fielding.
-    elif slitFileName and noFlat != True:
+    elif slitFileName is not None and noFlat != True:
         for i in range(len(maskDict['masterFlats'])):
             masterFlatPath=maskDict['masterFlats'][i]
             cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
@@ -575,10 +575,10 @@ def cutSlits(inFileName, outFileName, slitsDict):
 
 #-------------------------------------------------------------------------------------------------------------
 def slitsFromFile(slitFileName):
-    '''
+    """
     Creates dictionary that defines slits, using definitions from a file.
     File has 3 columns: slitno, ystart, and yend
-    '''
+    """
     dat = Table.read(slitFileName,format='ascii')
     slitsDict = {}
     for row in dat:
