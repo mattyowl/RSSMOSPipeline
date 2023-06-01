@@ -5,12 +5,18 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
-
-#from RSSMOSPipeline import __version__
+import os, sys
+sys.path.insert(0, os.path.abspath('..'))
+from RSSMOSPipeline import __version__
 
 project = 'RSSMOSPipeline'
 copyright = '2023, Matt Hilton, Melissa Moris'
 author = 'Matt Hilton, Melissa Moris'
+
+# The short X.Y version
+version = __version__
+# The full version, including alpha/beta/rc tags
+release = __version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -27,6 +33,8 @@ extensions = [
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
+# The master toctree document.
+master_doc = 'index'
 
 
 # -- Options for HTML output -------------------------------------------------
