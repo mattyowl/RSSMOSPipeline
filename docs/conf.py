@@ -10,8 +10,8 @@ sys.path.insert(0, os.path.abspath('..'))
 from RSSMOSPipeline import __version__
 
 project = 'RSSMOSPipeline'
-copyright = '2023, Matt Hilton, Melissa Moris'
-author = 'Matt Hilton, Melissa Moris'
+copyright = '2023, Matt Hilton, Melissa Morris'
+author = 'Matt Hilton, Melissa Morris'
 
 # The short X.Y version
 version = __version__
