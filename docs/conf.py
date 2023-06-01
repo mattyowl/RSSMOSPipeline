@@ -6,7 +6,7 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-from RSSMOSPipeline import __version__
+#from RSSMOSPipeline import __version__
 
 project = 'RSSMOSPipeline'
 copyright = '2023, Matt Hilton, Melissa Moris'
