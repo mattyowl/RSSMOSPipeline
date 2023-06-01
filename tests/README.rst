@@ -4,7 +4,7 @@ RSSMOSPipeline uses the `Robot Framework <http://robotframework.org/>`_ for test
            `tests <https://github.com/mattyowl/RSSMOSPipeline/tree/master/tests>`_
            directory of the **RSSMOSPipeline** source distribution.
 
-To run a set of tests that should take about X minutes:
+To run the full set of tests (may take a while):
 
 .. code-block::
 
