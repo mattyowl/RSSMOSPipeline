@@ -38,7 +38,7 @@ from scipy import stats
 import pickle
 import logging
 import RSSMOSPipeline
-import IPython
+# import IPython
 from astropy.table import Table
 #plt.matplotlib.interactive(True)
 
@@ -1349,9 +1349,7 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
         try:
             slope, intercept=np.polyfit(ys, xs, 1)
         except:
-            print("polyfit failed")
-            IPython.embed()
-            sys.exit()
+            raise Exception("polyfit failed")
         row['slope']=slope
         row['intercept']=intercept
 
@@ -1648,9 +1646,7 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
         prof=np.zeros(data.shape[0])
     
     if np.any(np.isnan(prof)) == True:
-        print("nans in object profile")
-        IPython.embed()
-        sys.exit()
+        raise Exception("nans in object profile")
         
     # Sometimes we get rubbish in slit edges being counted as signal - spot that, and remove it
     segmentationMap, numObjects=ndimage.label(prof)
@@ -1776,9 +1772,7 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
         try:
             skySub=skySub-subFrac*sky2d 
         except:
-            print("skySub fail")
-            IPython.embed()
-            sys.exit()
+            raise Exception("skySub failure")
         signal=xArr[0]
         signal[np.less(signal, 0)]=0.
         signalArr[k]=signal
@@ -2006,9 +2000,7 @@ def checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5, mismatchLi
     try:
         smoothSky=ndimage.uniform_filter1d(sky, 30)
     except:
-        print("smoothSky problem")
-        IPython.embed()
-        sys.exit()
+        raise Exception("smoothSky problem")
     smoothSky=ndimage.uniform_filter1d(sky, int(sky.shape[0]/3))
     bckSubSky=sky-smoothSky
     

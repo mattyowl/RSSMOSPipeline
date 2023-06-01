@@ -33,7 +33,7 @@ import numpy as np
 import logging
 from RSSMOSPipeline import RSSMOSTools
 #import pickle
-import IPython
+# import IPython
 #plt.matplotlib.interactive(True)
 
 #-------------------------------------------------------------------------------------------------------------

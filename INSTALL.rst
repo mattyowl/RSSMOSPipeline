@@ -1,13 +1,12 @@
 **RSSMOSPipeline** is written in pure Python (only 3.x is supported now). It needs the following modules to be installed:
 
-* numpy
-* scipy
+* astLib
 * astropy
 * matplotlib
-* IPython
+* numpy
+* scipy
 
 The install script (see below) should install the needed modules automatically if they are not already on your system.
-IPython is used for debugging, but isn't really needed to run the pipeline.
 
 The latest tagged version of **RSSMOSPipeline** can be installed using ``pip``:
 
