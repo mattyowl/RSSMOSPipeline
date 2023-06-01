@@ -1,6 +1,6 @@
 .. image:: https://readthedocs.org/projects/RSSMOSPipeline/badge/?version=latest
 
-Pipeline for reducing both longslit and multi-object spectroscopy from the
+Pipeline for reducing both longslit and multi-object spectroscopy data from the
 Robert Stobie Spectrograph on `SALT <https://www.salt.ac.za/>`_.
 
 * **Documentation**: https://rssmospipeline.readthedocs.io
