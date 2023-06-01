@@ -1,4 +1,6 @@
-.. image:: https://readthedocs.org/projects/RSSMOSPipeline/badge/?version=latest
+.. image:: https://readthedocs.org/projects/rssmospipeline/badge/?version=latest
+    :target: https://rssmospipeline.readthedocs.io/en/latest/?badge=latest
+    :alt: Documentation Status
 
 Pipeline for reducing both longslit and multi-object spectroscopic data from the
 Robert Stobie Spectrograph on `SALT <https://www.salt.ac.za/>`_.
