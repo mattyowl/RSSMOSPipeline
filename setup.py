@@ -16,10 +16,5 @@ setup(name='RSSMOSPipeline',
       author_email='matt.hilton@wits.ac.za',
       packages=['RSSMOSPipeline'],
       package_data={'RSSMOSPipeline': ['data/*', 'data/modelArcSpectra/*', 'data/templateSpectra/*', 'data/templateSpectra/TremontiStarburstTemplate/*']},
-      scripts=['bin/rss_mos_reducer', 'bin/rss_mos_create_arc_model', 'bin/rss_mos_inspect_arc_model', 'bin/rss_mos_visual_inspector'],
-      install_requires=["astropy >= 3.2",
-                        "numpy >= 1.10",
-                        "matplotlib >= 2.0",
-                        "scipy >= 1.0",
-                        "astLib >= 0.11.6"]
+      scripts=['bin/rss_mos_reducer', 'bin/rss_mos_create_arc_model', 'bin/rss_mos_inspect_arc_model', 'bin/rss_mos_visual_inspector']
 )
