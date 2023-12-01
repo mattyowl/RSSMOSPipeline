@@ -136,7 +136,7 @@ Longslit mode
 
 The pipeline can also run on longslit data. The code detects object traces in each science frame,
 and creates "pseudo-slitlets" around each detected object. The processing steps are otherwise identical to those
-for MOS data. If necessary, you can use the --longslit-threshold option to change the detection threshold used.
+for MOS data. If necessary, you can use the ``--longslit-threshold`` option to change the detection threshold used.
 
 
 Manually specifying slit (or object spectrum) locations
@@ -144,7 +144,7 @@ Manually specifying slit (or object spectrum) locations
 
 If you know the position of the slits in the FITS file, and/or the automated object/slit finding is not
 working well on your data for some reason, you can specify them in a plain-text file.
-To do this, you can do this using the `-F` argument, e.g.::
+To do this, you can do this using the ``-F`` argument, e.g.::
 
     rss_mos_reducer -F slit_loc.txt product reduced all
 
@@ -163,7 +163,10 @@ No flats? No problem!
 =====================
 
 If you don't have flat fields for your observations, you can skip flat fielding altogether with the ``-n`` argument.
-If you do this, you *must* also specify the location of your slits using the ``-F`` argument (see above).
+If no flat fields are found for your observations, the pipeline will attempt to drop into this mode automatically.
+
+Note that if you do not have flats for MOS data, you *must* also specify the location of your slits using
+the ``-F`` argument (see above).
 
 
 Things which can/should be improved/added

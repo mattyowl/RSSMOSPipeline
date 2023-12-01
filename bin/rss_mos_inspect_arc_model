@@ -33,6 +33,7 @@ import numpy as np
 from scipy import ndimage
 from scipy import interpolate
 from scipy import optimize
+import RSSMOSPipeline
 import argparse
 import pickle
 # import IPython
@@ -168,6 +169,7 @@ def makeParser():
 
     parser = argparse.ArgumentParser("rss_mos_inspect_arc_model")
     parser.add_argument("refModelFileName", help="The name of the RefModel_*.pickle file to inspect.")
+    parser.add_argument("-v", "--version", action = 'version', version = '%(prog)s' + ' %s' % (RSSMOSPipeline.__version__))
 
     return parser
 
