@@ -1,2 +1,10 @@
 include versioneer.py
 include RSSMOSPipeline/_version.py
+include tests/*.rst
+include tests/*.robot
+include tests/*.py
+include tests/lib/*.py
+include docs/*.py
+include docs/*.rst
+include docs/Makefile
+
