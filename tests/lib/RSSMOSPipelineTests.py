@@ -54,6 +54,40 @@ class RSSMOSPipelineTests(object):
             os.chdir(thisDir)
 
 
+    def setup_longslit(self):
+        """Set-up for tests that use longslit data - downloads them if not found.
+
+        """
+
+        thisDir=os.getcwd()
+        self.productDir="product_longslit"
+        if os.path.exists(self.cacheDir+os.path.sep+self.productDir+os.path.sep+"mbxgpP202102040049.fits") == False:
+            os.chdir(self.cacheDir)
+            self._get_longslit_data()
+            os.chdir(thisDir)
+
+
+    def setup_no_flats_longslit(self):
+        """Set-up for tests that use longslit data - downloads them if not found.
+
+        """
+
+        thisDir=os.getcwd()
+        self.productDir="product_longslit_noflats"
+        if os.path.exists(self.cacheDir+os.path.sep+self.productDir+os.path.sep+"mbxgpP202102040049.fits") == False:
+            os.chdir(self.cacheDir)
+            self._get_longslit_data()
+            os.chdir(thisDir)
+
+
+    def _get_longslit_data(self):
+            print(">>> Downloading longslit data [this will be cached under %s so only needs to be done once] ..." % (self.cacheDir))
+            os.system("wget 'https://www.dropbox.com/scl/fi/w42hj8x0xa46aqpkwdugf/longslit-test-data.tar.gz?rlkey=j52i0zkqnax9xgx94ujck1wkc&dl=0'")
+            # os.system("wget 'https://www.dropbox.com/scl/fi/1w72qdjrzn7pvjl93zhd2/mos-test-data.tar.gz?dl=0&rlkey=zxh7ddok0mimazf65yw6qx8sw'")
+            os.system("tar -zxvf 'longslit-test-data.tar.gz?rlkey=j52i0zkqnax9xgx94ujck1wkc&dl=0'")
+            os.remove("longslit-test-data.tar.gz?rlkey=j52i0zkqnax9xgx94ujck1wkc&dl=0")
+
+
     def makeSlitFile(self, slitNum, yStart, yEnd):
         """Makes a file called manualSlitLoc.txt that contains location of a single slit, manually specified.
 
@@ -63,21 +97,26 @@ class RSSMOSPipelineTests(object):
             outFile.write("%s     %d     %d\n" % (int(slitNum), int(yStart), int(yEnd)))
 
 
-    def run_MOS_reduction(self, reducedDir = None, maskName = None):
+    def run_reduction(self, reducedDir = None, maskName = None):
         args=['rss_mos_reducer', self.productDir, reducedDir, maskName]
         self._run_command(args)
 
 
-    def run_MOS_reduction_on_selected_slits(self, reducedDir = None, maskName = None, slits = None):
+    def run_reduction_on_selected_slits(self, reducedDir = None, maskName = None, slits = None):
         args=['rss_mos_reducer', self.productDir, reducedDir, maskName, '-s', slits]
         self._run_command(args)
 
 
-    def run_MOS_reduction_using_slit_file(self, reducedDir = None, maskName = None, slitFileName = None):
+    def run_no_flats_reduction_on_selected_slits(self, reducedDir = None, maskName = None, slits = None):
+        args=['rss_mos_reducer', self.productDir, reducedDir, maskName, '-n', '-s', slits]
+        self._run_command(args)
+
+
+    def run_reduction_using_slit_file(self, reducedDir = None, maskName = None, slitFileName = None):
         args=['rss_mos_reducer', self.productDir, reducedDir, maskName, '-F', slitFileName]
         self._run_command(args)
 
-        
+
     def cross_match(self, inCatalogFileName, outCatalogFileName, radiusArcmin = 1.0):
         """Cross matches input and output source catalogs.
         

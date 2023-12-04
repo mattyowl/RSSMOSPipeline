@@ -38,6 +38,7 @@ from scipy import interpolate
 from scipy import optimize
 import argparse
 import pickle
+import RSSMOSPipeline
 # import IPython
 #plt.matplotlib.interactive(True)
 
@@ -273,6 +274,7 @@ def makeParser():
     parser=argparse.ArgumentParser("rss_mos_create_arc_model")
     parser.add_argument("arcFileName", help="Path to 2d arc file name")
     parser.add_argument("-y", "--y", dest="yRow", help="row from which to extract arc spectrum")
+    parser.add_argument("-v", "--version", action = 'version', version = '%(prog)s' + ' %s' % (RSSMOSPipeline.__version__))
 
     return parser
 

@@ -1,9 +1,8 @@
 """
 
-    Routines used by the rss_mos_reducer script
+    Copyright 2014-2022 Matt Hilton
+    Copyright 2023 Matt Hilton, Melissa Morris
 
-    Copyright 2014-2020 Matt Hilton (matt.hilton@mykolab.com)
-    
     This file is part of RSSMOSPipeline.
 
     RSSMOSPipeline is free software: you can redistribute it and/or modify
@@ -150,7 +149,7 @@ def splitMEF(MEFFileName, rootOutFileName):
             newImg.writeto(outFileName, overwrite = True)    
 
 #-------------------------------------------------------------------------------------------------------------
-def getImageInfo(rawDir):
+def getImageInfo(rawDir, modelArcsDir = None):
     """Sorts through all .fits files, making lists of biases, flats, science frames, arc frames, for each 
     night of observations, grating, position combo. Returns a dictionary of lists.
     
@@ -162,7 +161,7 @@ def getImageInfo(rawDir):
     logger.info("Reading image headers (cache file location: %s)" % (pickleFileName))    
     previousFiles=[]
     infoDict={}
-    if os.path.exists(pickleFileName) == True:
+    if os.path.exists(pickleFileName) == True and modelArcsDir is None:
         with open(pickleFileName, "rb") as pickleFile:
             unpickler=pickle.Unpickler(pickleFile)
             infoDict=unpickler.load()
@@ -170,7 +169,7 @@ def getImageInfo(rawDir):
         
     # Now organised by objectName and meta info -> flats, arcs, object frames
     # This is so we can use one pipeline for MOS and longslit
-    files=glob.glob(rawDir+os.path.sep+"mbxgp*.fits")  # Files either GMOS N or S depending on mask name
+    files=glob.glob(rawDir+os.path.sep+"mbxgp*.fits")
     newFiles=[]
     for f in files:
         if f not in previousFiles:
@@ -243,7 +242,10 @@ def getImageInfo(rawDir):
                                     grating=pImg[0].header['GRATING']
                                     lampid=pImg[0].header['LAMPID']
                                     modelFileNamesGlob=REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_*.pickle"
-                                for modelFileName in glob.glob(modelFileNamesGlob):
+                                modelFileNames=glob.glob(modelFileNamesGlob)
+                                if modelArcsDir is not None:
+                                    modelFileNames=modelFileNames+glob.glob(modelArcsDir+os.path.sep+"RefModel_"+grating+"_"+lampid+"_*.pickle")
+                                for modelFileName in modelFileNames:
                                     if modelFileName not in infoDict[maskName][maskID]['modelFileNames'] and matchesSettings == True and lampid != "NONE":
                                         infoDict[maskName][maskID]['modelFileNames'].append(modelFileName)
                                         if os.path.exists(modelFileName) == True:
@@ -466,7 +468,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = None, noFl
         writeDS9SlitRegions(regFileName, slitsDict, f)
         
 #-------------------------------------------------------------------------------------------------------------
-def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0):
+def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0, noFlat = False):
     """For longslit data. Finds objects, and then cuts into pseudo-slitlets: we take some region +/- Y pixels
     around the object trace and pretend that is a MOS slitlet. Outputs MEF files.
             
@@ -520,9 +522,17 @@ def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0):
     maskDict['cutFlatDict']={}
     maskDict['cutArcDict']={}
     for f, outFileName in zip(toCutList, outCutList):
-        logger.info("cutting %s (and arcs, flats) using %s for slit definition ..." % (f, f))
-        slitsDict=maskDict['slitsDicts'][f]
-        label=os.path.split(f)[-1].replace(".fits", "")
+        if noFlat == False:
+            logger.info("cutting %s (and arcs, flats) using %s for slit definition ..." % (f, f))
+            slitsDict=maskDict['slitsDicts'][f]
+            label=os.path.split(f)[-1].replace(".fits", "")
+            flatFileName=findMatchingFilesByTime(f, maskDict['masterFlats'], timeInterval = None)[0]
+            cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
+            cutSlits(flatFileName, cutFlatFileName, slitsDict)
+            maskDict['cutFlatDict'][f]=cutFlatFileName
+        else:
+            label='masterFlat_0'
+            flatFileName='masterFlat_0'
         # Object
         cutSlits(f, outFileName, slitsDict)
         # Arc
@@ -530,11 +540,6 @@ def cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = 3.0):
         cutArcFileName=makeOutputFileName(arcFileName, "c"+label, outDir)
         cutSlits(arcFileName, cutArcFileName, slitsDict)
         maskDict['cutArcDict'][f]=cutArcFileName
-        # Flat
-        flatFileName=findMatchingFilesByTime(f, maskDict['masterFlats'], timeInterval = None)[0]
-        cutFlatFileName=makeOutputFileName(flatFileName, "c"+label, outDir)
-        cutSlits(flatFileName, cutFlatFileName, slitsDict)
-        maskDict['cutFlatDict'][f]=cutFlatFileName
     
         # Write out a .reg file so we can match slits to objects
         img=pyfits.open(f)
@@ -1501,7 +1506,7 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
     img.writeto(outFileName, overwrite = True)
     
 #-------------------------------------------------------------------------------------------------------------
-def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
+def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all", modelArcsDir = None):
     """Finds 2d wavelength calibration from arc frames, applies to arc frames and object frames, rectifying
     them and also interpolating to a linear wavelength scale to make life easier later.
     
@@ -1536,6 +1541,8 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all"):
         # Now we don't care about spatial binning for finding arcs
         binning=binning[:-1]+"?"
         modelFileNames=glob.glob(REF_MODEL_DIR+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle")
+        if modelArcsDir is not None:
+            modelFileNames=modelFileNames+glob.glob(modelArcsDir+os.path.sep+"RefModel_"+grating+"_"+lampid+"_"+binning+".pickle")
 
         if cutArcPath not in maskDict['wavelengthCalib'].keys():
             maskDict['wavelengthCalib'][cutArcPath]={}

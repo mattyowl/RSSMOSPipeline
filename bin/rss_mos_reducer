@@ -32,9 +32,7 @@ import argparse
 import numpy as np
 import logging
 from RSSMOSPipeline import RSSMOSTools
-#import pickle
-# import IPython
-#plt.matplotlib.interactive(True)
+import RSSMOSPipeline
 
 #-------------------------------------------------------------------------------------------------------------
 def makeParser():
@@ -51,6 +49,9 @@ def makeParser():
     parser.add_argument("-S", "--skip-done", dest="skipDone", default=False, action='store_true', help="Skip previously processed masks, for which output already exists.")
     parser.add_argument("-F", "--slit-file", dest="slitFileName", default=None, help="Specifies a plain text file from which to read slit locations instead of autmatically finding them (3 column format, where the first line must be the heading: 'slitno  ystart  yend', subsequent lines give slit number and rows defining the slit e.g., '10 988 1026').")
     parser.add_argument("-n", "--no-flat", dest="noFlat", default=False, action='store_true', help="If no flats, skips flag fielding. Likely will need to be run with -F.")
+    parser.add_argument("-m", "--model-arcs-dir", dest="modelArcsDir", default=None,
+                        help = "If given, look in this directory for wavelength calibration model arc spectra, in addition to the default built-in location.")
+    parser.add_argument("-v", "--version", action = 'version', version = '%(prog)s' + ' %s' % (RSSMOSPipeline.__version__))
 
     return parser
 
@@ -63,7 +64,10 @@ if __name__ == '__main__':
     rawDir=args.rawDir
     baseOutDir=args.reducedDir
     maskName=args.maskName
-    
+    modelArcsDir=args.modelArcsDir
+    if modelArcsDir is not None:
+        modelArcsDir=os.path.abspath(modelArcsDir)
+
     threshold=float(args.threshold)
     longslitThreshold=float(args.longslitThreshold)
     subFrac=float(args.subFrac)
@@ -96,7 +100,7 @@ if __name__ == '__main__':
     logger.info("parameters: %s" % str(args))
             
     # Sort out what's what...
-    infoDict=RSSMOSTools.getImageInfo(rawDir)
+    infoDict=RSSMOSTools.getImageInfo(rawDir, modelArcsDir = modelArcsDir)
     
     if maskName == 'list':
         maskList=list(infoDict.keys())
@@ -160,11 +164,17 @@ if __name__ == '__main__':
         
         RSSMOSTools.makeMasterFlats(maskDict, outDir)
 
+        if len(maskDict['FLAT']) == 0:
+            logger.warning('NO FLATS FOUND FOR THIS OBSERVATION - SWITCHING TO NO-FLATS MODE')
+            args.noFlat=True
+
         logger.info('maskType: %s' % (maskType))
         if maskType == 'MOS':
-            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold, slitFileName = args.slitFileName)
+            RSSMOSTools.cutIntoSlitLets(maskDict, outDir, threshold = threshold, slitFileName = args.slitFileName,
+                                        noFlat = args.noFlat)
         elif maskType == 'LONGSLIT':
-            RSSMOSTools.cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = longslitThreshold)
+            RSSMOSTools.cutIntoPseudoSlitLets(maskDict, outDir, thresholdSigma = longslitThreshold,
+                                              noFlat = args.noFlat)
         
         if args.noFlat:
             logger.warning('SKIPPING FLAT FIELDING')
@@ -175,7 +185,7 @@ if __name__ == '__main__':
                 logger.warning("flat fielding failed on mask '%s' - try different threshold or longslitThreshold?" % (maskName))
                 continue
         
-        RSSMOSTools.wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList)
+        RSSMOSTools.wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList, modelArcsDir = modelArcsDir)
 
         RSSMOSTools.extractAndStackSpectra(maskDict, outDir, extensionsList = extensionsList, 
                                            iterativeMethod = iterativeMethod, subFrac = subFrac)
