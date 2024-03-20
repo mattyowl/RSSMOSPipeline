@@ -2358,7 +2358,7 @@ def fitProfile(data, mask, borderPix = 4):
         gauss=np.exp(-((x-x0)**2)/(2*s**2))
         resArr[i]=((prof-gauss)**2).sum()
         #plt.plot(gauss)
-    sigma=sigmaRange[np.where(resArr == resArr.min())]/2
+    sigma=sigmaRange[np.where(resArr == resArr.min())]
     #fittedProf=np.exp(-((x-x0)**2)/(2*sigma**2))
     
     return x0, sigma
