@@ -34,6 +34,7 @@ from scipy import interpolate
 from scipy import ndimage
 from scipy import optimize
 from scipy import stats
+import RSSMOSPipeline
 import pickle
 import logging
 import RSSMOSPipeline
@@ -1314,7 +1315,9 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     for row in refModelDict['featureTable']:
         transformed_model_x=(row['x_centreRow']-bestFitShift)/(1+bestFitScale)
         dist=abs(arcFeatureTable['x_centreRow']-transformed_model_x)
-        if dist.min() < maxDistancePix:
+        if len(dist) == 0:
+            continue
+        elif dist.min() < maxDistancePix:
             index=np.argmin(dist)
             arcFeatureTable['wavelength'][index]=row['wavelength']
     arcFeatureTable=arcFeatureTable[np.where(arcFeatureTable['wavelength'] != 0)]
@@ -2475,6 +2478,7 @@ def write1DSpectrum(signal, sky, wavelength, outFileName, maskRA, maskDec, mask 
     HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
     HDUList[0].header['MASKRA']=maskRA
     HDUList[0].header['MASKDEC']=maskDec
+    HDUList[0].header['VERSION']=RSSMOSPipeline.__version__
     if os.path.exists(outFileName) == True:
         os.remove(outFileName)
     HDUList.writeto(outFileName, overwrite = True)   
