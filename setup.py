@@ -6,13 +6,11 @@ import os
 import glob
 from setuptools import setup
 from setuptools import Extension
-import versioneer
 import numpy
 
 setup(name='RSSMOSPipeline',
-      version=versioneer.get_version(),
-      cmdclass=versioneer.get_cmdclass(),
-      author='Matt Hilton',
+      version='0.7.0',
+      author='Matt Hilton, Melissa Morris',
       author_email='matt.hilton@wits.ac.za',
       packages=['RSSMOSPipeline'],
       package_data={'RSSMOSPipeline': ['data/*', 'data/modelArcSpectra/*', 'data/templateSpectra/*', 'data/templateSpectra/TremontiStarburstTemplate/*']},

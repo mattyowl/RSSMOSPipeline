@@ -2,7 +2,8 @@
 
     RSSMOSPipeline
 
-    Copyright 2014-2020 Matt Hilton (matt.hilton@mykolab.com)
+    Copyright 2014-2024 Matt Hilton (matt.hilton@wits.ac.za) and
+    contributors.
     
     This file is part of RSSMOSPipeline.
 
@@ -22,6 +23,4 @@
 """
 from . import RSSMOSTools
 
-from ._version import get_versions
-__version__ = get_versions()['version']
-del get_versions
+__version__ = '0.7.0'

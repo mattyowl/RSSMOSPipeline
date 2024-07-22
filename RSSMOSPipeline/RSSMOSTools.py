@@ -377,7 +377,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = None, noFl
     
     """
 
-    if len(maskDict['masterFlats']) == 0:
+    if len(maskDict['masterFlats']) == 0 and slitFileName is None:
         raise Exception("No flat field through the slit mask is provided, so slit locations cannot be found - you will need to re-run using the -n and -F switches (use rss_mos_reducer -h to get help on the different options).")
 
     maskDict['slitsDicts']={}
