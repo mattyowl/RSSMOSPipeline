@@ -2355,7 +2355,7 @@ def fitProfile(data, mask, borderPix = 4):
         gauss=np.exp(-((x-x0)**2)/(2*s**2))
         resArr[i]=((prof-gauss)**2).sum()
         #plt.plot(gauss)
-    sigma=sigmaRange[np.where(resArr == resArr.min())]/2
+    sigma=sigmaRange[np.where(resArr == resArr.min())]
     #fittedProf=np.exp(-((x-x0)**2)/(2*sigma**2))
     
     return x0, sigma
@@ -2404,9 +2404,13 @@ def finalExtraction(data, subFrac = 0.8):
     # Fit for trace centre, just use median for trace width sigma (doesn't vary by that much)
     x=np.arange(data.shape[1])
     mask=np.greater(profCentres, 0) # fitProfile returns -99 for completely masked data
-    result=stats.linregress(x[mask], profCentres[mask])
-    traceCentre=x*result.slope+result.intercept
+
+    # Make trace of order 4
+    coeffs = np.polyfit(x[mask], profCentres[mask], order=4)
+    traceCentre = np.polyval(coeffs, x[mask])
     traceSigma=np.median(profSigmas[mask])
+
+    
     
     # Make 2d running profile
     runningProf=np.zeros(data.shape)
