@@ -2407,9 +2407,13 @@ def finalExtraction(data, subFrac = 0.8):
     # Fit for trace centre, just use median for trace width sigma (doesn't vary by that much)
     x=np.arange(data.shape[1])
     mask=np.greater(profCentres, 0) # fitProfile returns -99 for completely masked data
-    result=stats.linregress(x[mask], profCentres[mask])
-    traceCentre=x*result.slope+result.intercept
+
+    # Make trace of order 4
+    coeffs = np.polyfit(x[mask], profCentres[mask], order=4)
+    traceCentre = np.polyval(coeffs, x[mask])
     traceSigma=np.median(profSigmas[mask])
+
+    
     
     # Make 2d running profile
     runningProf=np.zeros(data.shape)
