@@ -37,7 +37,6 @@ from scipy import stats
 import RSSMOSPipeline
 import pickle
 import logging
-import RSSMOSPipeline
 # import IPython
 from astropy.table import Table
 #plt.matplotlib.interactive(True)
