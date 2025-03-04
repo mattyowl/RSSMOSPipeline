@@ -96,6 +96,7 @@ if __name__ == '__main__':
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
+    logger.info("RSSMOSPipeline version = %s" % (RSSMOSPipeline.__version__))
     logger.info("started: %s" % (datetime.datetime.now().isoformat()))
     logger.info("parameters: %s" % str(args))
             

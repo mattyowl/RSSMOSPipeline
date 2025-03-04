@@ -7,7 +7,7 @@ Robert Stobie Spectrograph on `SALT <https://www.salt.ac.za/>`_.
 
 * **Documentation**: https://rssmospipeline.readthedocs.io
 * **License**: `GPL v3 <https://github.com/mattyowl/RSSMOSPipeline/blob/master/LICENSE>`_
-* **Authors**: Matt Hilton, Melissa Morris
+* **Authors**: Matt Hilton, with contributions from Melissa Morris, George Kharchilava
 * **Installation**: ``pip install RSSMOSPipeline``
 * **Support**: Please use the `GitHub issues page <https://github.com/mattyowl/RSSMOSPipeline/issues>`_,
   or contact `Matt Hilton <mailto:matt.hilton@wits.ac.za>`_.

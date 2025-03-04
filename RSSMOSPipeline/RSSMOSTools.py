@@ -34,9 +34,9 @@ from scipy import interpolate
 from scipy import ndimage
 from scipy import optimize
 from scipy import stats
+import RSSMOSPipeline
 import pickle
 import logging
-import RSSMOSPipeline
 # import IPython
 from astropy.table import Table
 #plt.matplotlib.interactive(True)
@@ -376,7 +376,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = None, noFl
     
     """
 
-    if len(maskDict['masterFlats']) == 0:
+    if len(maskDict['masterFlats']) == 0 and slitFileName is None:
         raise Exception("No flat field through the slit mask is provided, so slit locations cannot be found - you will need to re-run using the -n and -F switches (use rss_mos_reducer -h to get help on the different options).")
 
     maskDict['slitsDicts']={}
@@ -1314,7 +1314,9 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     for row in refModelDict['featureTable']:
         transformed_model_x=(row['x_centreRow']-bestFitShift)/(1+bestFitScale)
         dist=abs(arcFeatureTable['x_centreRow']-transformed_model_x)
-        if dist.min() < maxDistancePix:
+        if len(dist) == 0:
+            continue
+        elif dist.min() < maxDistancePix:
             index=np.argmin(dist)
             arcFeatureTable['wavelength'][index]=row['wavelength']
     arcFeatureTable=arcFeatureTable[np.where(arcFeatureTable['wavelength'] != 0)]
@@ -2479,6 +2481,7 @@ def write1DSpectrum(signal, sky, wavelength, outFileName, maskRA, maskDec, mask 
     HDUList=pyfits.HDUList([pyfits.PrimaryHDU(), tabHDU])
     HDUList[0].header['MASKRA']=maskRA
     HDUList[0].header['MASKDEC']=maskDec
+    HDUList[0].header['VERSION']=RSSMOSPipeline.__version__
     if os.path.exists(outFileName) == True:
         os.remove(outFileName)
     HDUList.writeto(outFileName, overwrite = True)   
