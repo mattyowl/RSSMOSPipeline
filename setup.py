@@ -10,7 +10,7 @@ import numpy
 
 setup(name='RSSMOSPipeline',
       version='0.7.0',
-      author='Matt Hilton, Melissa Morris',
+      author='Matt Hilton + RSSMOSPipeline Contributors',
       author_email='matt.hilton@wits.ac.za',
       packages=['RSSMOSPipeline'],
       package_data={'RSSMOSPipeline': ['data/*', 'data/modelArcSpectra/*', 'data/templateSpectra/*', 'data/templateSpectra/TremontiStarburstTemplate/*']},
