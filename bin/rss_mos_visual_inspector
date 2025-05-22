@@ -729,6 +729,7 @@ class App:
                             redrawSky = True, redrawFeatures=True, plotFeatures=self.plotFeatures)
         else:
             print("Finished checking all spectra!")
+            self.outFile.close()
             self.buttonFrame.quit()
             
                         
