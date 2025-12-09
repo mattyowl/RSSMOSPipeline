@@ -9,7 +9,7 @@ from setuptools import Extension
 import numpy
 
 setup(name='RSSMOSPipeline',
-      version='0.7.0',
+      version='0.8.0',
       author='Matt Hilton + RSSMOSPipeline Contributors',
       author_email='matt.hilton@wits.ac.za',
       packages=['RSSMOSPipeline'],

@@ -172,6 +172,11 @@ def getImageInfo(rawDir, modelArcsDir = None):
     files=glob.glob(rawDir+os.path.sep+"mbxgp*.fits")
     newFiles=[]
     for f in files:
+        # Skip new pipeline reduced files, which get mixed in with the ones we actually want
+        if '_wr.fits' in f:
+            continue
+        if 'Flat' in f:
+            continue
         if f not in previousFiles:
             newFiles.append(f)
     
@@ -260,7 +265,7 @@ def getImageInfo(rawDir, modelArcsDir = None):
         pickler=pickle.Pickler(pickleFile)
         pickler.dump(infoDict)
         pickler.dump(previousFiles)
-            
+
     return infoDict
 
 #-------------------------------------------------------------------------------------------------------------
@@ -1734,10 +1739,10 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
     while diff > tolerance or k > maxIterations:
         t0=time.time()
         xArr=[]
-        if iterateProfile == True and runningProfile == None:
+        if iterateProfile == True or type(runningProfile) != np.ndarray:
             prof=measureProfile(skySub, wn2d)   # non-running prof
         for i in range(data.shape[1]):
-            if np.any(runningProfile) != None:
+            if runningProfile is not None:
                 prof=runningProfile[:, i]
             # Running prof - this behaves strangely...
             #runWidth=200
@@ -2083,6 +2088,10 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
     if os.path.exists(stackExtractSpecDir) == False:
         os.makedirs(stackExtractSpecDir)    
 
+    finalExtractSpecDir=outDir+os.path.sep+"1DSpec_finalExtract"
+    if os.path.exists(finalExtractSpecDir) == False:
+        os.makedirs(finalExtractSpecDir)
+
     # Log checks of wavelength calibration
     skyWavelengthCalibCheckList=[]
         
@@ -2245,15 +2254,12 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                         mask = chipGapMask)
         
         # Experimenting with a method that will handle running profile
-        #t0=time.time()
-        #signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
-        #t1=time.time()
-        #print "... final extraction (took %.3f sec) ..." % (t1-t0)
-        #outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_testFinal.fits"
-        #write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])        
-        #print "final extract again"
-        #IPython.embed()
-        #sys.exit()
+        t0=time.time()
+        signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
+        t1=time.time()
+        print("... final extraction (took %.3f sec) ..." % (t1-t0))
+        outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
+        write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
         
         # Write 2d combined spectrum
         outFileName=stackExtractSpecDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
@@ -2408,12 +2414,13 @@ def finalExtraction(data, subFrac = 0.8):
     mask=np.greater(profCentres, 0) # fitProfile returns -99 for completely masked data
 
     # Make trace of order 4
-    coeffs = np.polyfit(x[mask], profCentres[mask], order=4)
-    traceCentre = np.polyval(coeffs, x[mask])
+    # coeffs=np.polyfit(x[mask], profCentres[mask], order=4)
+    # traceCentre=np.polyval(coeffs, x[mask])
+    coeffs=np.polynomial.Polynomial.fit(x[mask], profCentres[mask], deg=4)
+    traceCentre=coeffs(x[mask])
+
     traceSigma=np.median(profSigmas[mask])
 
-    
-    
     # Make 2d running profile
     runningProf=np.zeros(data.shape)
     x=np.arange(data.shape[0])
