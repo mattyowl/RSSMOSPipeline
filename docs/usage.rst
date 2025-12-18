@@ -43,7 +43,7 @@ Running the pipeline
 3. After the pipeline has finished, you will find data at various stages of reduction under the
    ``reducedData`` dir (``reduced`` for the above example). At the moment, this is not cleaned up.
 
-   Two methods are used for extracting spectra:
+   Three methods are used for extracting spectra:
 
    1. Individual 1D spectra are extracted from each science frame and then stacked. This might be
       desirable if object traces shift from frame-to-frame. These are placed under::
@@ -56,7 +56,14 @@ Running the pipeline
 
       The stacked 2D spectra are also placed in this directory.
 
-   Currently method 2 seems to work best.
+   3. An alternative extraction method, that runs on the 2D stacked spectra produced by method 2.
+      This uses the iterative sky subtraction, and fits for the object trace running along the
+      slit. These are placed under::
+
+        `reducedDir/OBJECT_MASKID/1DSpec_altExtract/`.
+
+   Currently method 2 seems to work best, but output from all methods are made when running the
+   pipeline, so you can choose between them afterwards.
 
    If the iterative sky subtraction method is enabled (using the ``-i`` switch), then
    ``_iterative`` is appended to the name of the output directory (e.g., ``1DSpec_2DSpec_stackAndExtract_iterative``).

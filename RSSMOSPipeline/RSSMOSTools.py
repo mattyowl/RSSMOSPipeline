@@ -2088,7 +2088,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
     if os.path.exists(stackExtractSpecDir) == False:
         os.makedirs(stackExtractSpecDir)    
 
-    finalExtractSpecDir=outDir+os.path.sep+"1DSpec_finalExtract"
+    finalExtractSpecDir=outDir+os.path.sep+"1DSpec_altExtract"
     if os.path.exists(finalExtractSpecDir) == False:
         os.makedirs(finalExtractSpecDir)
 
@@ -2097,12 +2097,13 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         
     # Get list of extensions
     cutArcPath=maskDict['cutArcDict'][maskDict['OBJECT'][0]]                
-    img=pyfits.open(cutArcPath)
-    if extensionsList == "all":
-        extensionsList=[]
-        for hdu in img:
-            if "SLIT" in hdu.name:
-                extensionsList.append(hdu.name)
+    with pyfits.open(cutArcPath) as img:
+        dateObs=img[0].header['DATE-OBS'] # NOTE: assuming arc is taken same time as science frames
+        if extensionsList == "all":
+            extensionsList=[]
+            for hdu in img:
+                if "SLIT" in hdu.name:
+                    extensionsList.append(hdu.name)
     
     # The way we stack... identify signal dominated rows and average them to a 1d spectrum, then stack all 1d
     # Do same for sky rows
@@ -2212,7 +2213,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
             if sky.shape[0] > 0:
                 medianOffset, numLines=checkWavelengthCalibUsingSky(sky, regrid_wavelengths, featureMinPix = 5)
                 logger.info("extractAndStack - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines))
-                outFileName=extractStackSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+                outFileName=extractStackSpecDir+os.path.sep+"1D_from1DStack_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
                 write1DSpectrum(signal, sky, regrid_wavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
         except:
             print("sky has no shape")
@@ -2249,7 +2250,8 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
             signal, sky, mData=weightedExtraction(med)       
         # Put chipGapMask into 1d spectra
         chipGapMask=np.median(makeChipGapMask(med), axis = 0)
-        outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        # outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+        outFileName=stackExtractSpecDir+os.path.sep+"1D_from2DStack_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'],
                         mask = chipGapMask)
         
@@ -2257,8 +2259,9 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         t0=time.time()
         signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
         t1=time.time()
-        print("... final extraction (took %.3f sec) ..." % (t1-t0))
-        outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
+        print("... alternative extraction (took %.3f sec) ..." % (t1-t0))
+        # outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
+        outFileName=finalExtractSpecDir+os.path.sep+"1D_altExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
         
         # Write 2d combined spectrum
