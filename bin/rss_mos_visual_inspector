@@ -781,7 +781,7 @@ class App:
         try:
             segmentationMap, numObjects=ndimage.label(chipGapMask)
         except:
-            segmentationMap, numObjects=ndimage.label(chipGapMask.newbyteorder())            
+            segmentationMap, numObjects=ndimage.label(chipGapMask.view(chipGapMask.dtype.newbyteorder()))
         sigPixMask=np.equal(chipGapMask, 1)
         objIDs=np.unique(segmentationMap)
         objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
@@ -897,10 +897,10 @@ class App:
                     # Greek letters? eta will cause a problem here!
                     featureLabel=featureLabel.replace("alpha", "$\\alpha$")
                     featureLabel=featureLabel.replace("beta", "$\\beta$")
-                    featureLabel=featureLabel.replace("gamma", "$\gamma$")
-                    featureLabel=featureLabel.replace("delta", "$\delta$")
+                    featureLabel=featureLabel.replace("gamma", "$\\gamma$")
+                    featureLabel=featureLabel.replace("delta", "$\\delta$")
                     featureLabel=featureLabel.replace("epsilon", "$\\epsilon$")
-                    featureLabel=featureLabel.replace("zeta", "$\zeta$")
+                    featureLabel=featureLabel.replace("zeta", "$\\zeta$")
                     featureLabel=featureLabel.replace("theta", "$\\theta$")
                     featureLambda=(1.0+float(redshift))*item[1]
                     plt.plot((featureLambda,featureLambda), (0, 1.0), 'g--')
