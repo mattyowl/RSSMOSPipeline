@@ -25,6 +25,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.io.fits as pyfits
+import astropy.stats as apyStats
 import glob
 import time
 import datetime
@@ -374,10 +375,10 @@ def writeDS9SlitRegions(regFileName, slitsDict, imageFileName):
     outFile.close()        
     
 #-------------------------------------------------------------------------------------------------------------
-def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = None, noFlat = False):
+def cutIntoSlitLets(maskDict, outDir, thresholdSigma = 3, slitFileName = None, noFlat = False):
     """Cuts files into slitlets, making MEF files. 
             
-    threshold is the parameter used by findSlits
+    thresholdSigma is the parameter used by findSlits
     
     """
 
@@ -406,7 +407,7 @@ def cutIntoSlitLets(maskDict, outDir, threshold = 0.1, slitFileName = None, noFl
         for i in range(len(maskDict['masterFlats'])):
             masterFlatPath=maskDict['masterFlats'][i]
             cutMasterFlatPath=masterFlatPath.replace("masterFlat", "cmasterFlat")
-            slitsDict=findSlits(masterFlatPath, threshold = threshold)
+            slitsDict=findSlits(masterFlatPath, thresholdSigma = thresholdSigma)
             maskDict['slitsDicts'][masterFlatPath]=slitsDict
 
         # To avoid problems with occasional missing slits (if we treat each flat separately), use
@@ -596,7 +597,7 @@ def slitsFromFile(slitFileName):
     return slitsDict
     
 #-------------------------------------------------------------------------------------------------------------
-def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
+def findSlits(flatFileName, minSlitHeight = 5, thresholdSigma = 3):
     """Find the slits, without using any info from the mask design file...
     
     minSlitHeight is used to throw out any problematic weird too-narrow slits (if any)
@@ -619,37 +620,55 @@ def findSlits(flatFileName, minSlitHeight = 5, threshold = 0.1):
     d[zeroMask]=0.
     #d[np.isnan(d)]=0.0
 
-    # Use grad to find edges
+    # New
     prof=np.median(d, axis = 1)
-    grad=np.gradient(prof)
-    plusMask=np.greater(grad, threshold)
-    minusMask=np.less(grad, threshold*-1)
-
-    # This looks for alternating +/-, but will merge slits which butt up against each other
+    sigmaPix=apyStats.biweight_scale(prof, c = 9.0)
+    thresh=sigmaPix*thresholdSigma
+    threshProf=np.array(prof > thresh, dtype = float)
+    segMap, numObjects=ndimage.label(threshProf)
     slitsDict={}
-    lookingFor=1
-    yMin=None
-    yMax=None
     slitCount=0
-    for i in range(len(plusMask)):
-        if lookingFor == 1:
-            if plusMask[i] == True:
-                yMin=i
-                lookingFor=0
-        if lookingFor == 0:
-            if minusMask[i] == True:
-                yMax=i
-                lookingFor=1
-        if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
-            slitCount=slitCount+1
-            slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax, 'yCentre': (yMax+yMin)/2.}    
-            yMin=None
-            yMax=None
+    for i in range(1, numObjects+1):
+        indices=np.where(segMap == i)[0]
+        yMin=indices.min()
+        yMax=indices.max()
+        slitCount=slitCount+1
+        slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax, 'yCentre': (yMax+yMin)/2.}
+
+    # # BEGIN OLD
+    # # Use grad to find edges
+    # prof=np.median(d, axis = 1)
+    # grad=np.gradient(prof)
+    # plusMask=np.greater(grad, threshold)
+    # minusMask=np.less(grad, threshold*-1)
+    #
+    # # This looks for alternating +/-, but will merge slits which butt up against each other
+    # slitsDict={}
+    # lookingFor=1
+    # yMin=None
+    # yMax=None
+    # slitCount=0
+    # for i in range(len(plusMask)):
+    #     if lookingFor == 1:
+    #         if plusMask[i] == True:
+    #             yMin=i
+    #             lookingFor=0
+    #     if lookingFor == 0:
+    #         if minusMask[i] == True:
+    #             yMax=i
+    #             lookingFor=1
+    #     if yMin != None and yMax != None and (yMax - yMin) > minSlitHeight:
+    #         slitCount=slitCount+1
+    #         slitsDict[slitCount]={'yMin': yMin, 'yMax': yMax, 'yCentre': (yMax+yMin)/2.}
+    #         yMin=None
+    #         yMax=None
+    # # END OLD
     
-    ## Debugging
-    #print("Check slitsDict")
-    #IPython.embed()
-    #sys.exit()
+    # ## Debugging
+    # print("Check slitsDict")
+    # import IPython
+    # IPython.embed()
+    # sys.exit()
     
     # Slits can be bendy: measure the bendiness 
     # above routine misses large chunks of red end of bendy slits at top of mask
@@ -1447,12 +1466,22 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
         fitCoeffsArr=wavelengthCalibDict[extension]['fitCoeffsArr']
         
         # Can carry on if wavelength calib fails for a slit... fix later...
+        if fitCoeffsArr is None:
+            logger.warning("no wavelength calib fit coeffs for %s" % (extension))
+            continue
+
         if np.any(fitCoeffsArr) != None:
             
             # Using above, make an array containing wavelengths
             wavelengthsMap=np.zeros(data.shape)
             for y in range(data.shape[0]):
-                wavelengthCalibPoly=np.poly1d(fitCoeffsArr[y])
+                try:
+                    wavelengthCalibPoly=np.poly1d(fitCoeffsArr[y])
+                except:
+                    print("nu")
+                    import IPython
+                    IPython.embed()
+                    sys.exit()
                 wavelengthsMap[y]=wavelengthCalibPoly(np.arange(data.shape[1]))
             #astImages.saveFITS("wavelengthsMap.fits", wavelengthsMap, None)
             
