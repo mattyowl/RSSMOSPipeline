@@ -2257,13 +2257,15 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         
         # Experimenting with a method that will handle running profile
         t0=time.time()
-        signal, sky, skySubbed2d=finalExtraction(med, subFrac = subFrac)
-        t1=time.time()
-        print("... alternative extraction (took %.3f sec) ..." % (t1-t0))
-        # outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
-        outFileName=finalExtractSpecDir+os.path.sep+"1D_altExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
-        write1DSpectrum(signal, sky, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
-        
+        signalAlt, skyAlt, skySubbed2dAlt=finalExtraction(med, subFrac = subFrac)
+        if signalAlt is None:
+            logger.info("alt extraction failed for %s - continuing" % (extension))
+        else:
+            t1=time.time()
+            # outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
+            outFileName=finalExtractSpecDir+os.path.sep+"1D_altExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+            write1DSpectrum(signalAlt, skyAlt, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
+
         # Write 2d combined spectrum
         outFileName=stackExtractSpecDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
         newImg=pyfits.HDUList()
@@ -2276,7 +2278,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         newImg.close()
         
         # Quantify wavelength calibration accuracy using sky
-        if sky.sum() > 0:
+        if sky is not None and sky.sum() > 0:
             medianOffset, numLines=checkWavelengthCalibUsingSky(sky, refWavelengths, featureMinPix = 5)
             logger.info("stackAndExtract - sky wavelength calib check: medianOffset = %.3f Angstroms, numLines = %d" % (medianOffset, numLines))
             skyWavelengthCalibCheckList.append([extension, medianOffset, numLines])
@@ -2340,6 +2342,9 @@ def fitProfile(data, mask, borderPix = 4):
     
     """
     
+    if borderPix*2 >= data.shape[0]:
+        return -99, -99
+
     # Prior - upweight pixels near centre, for finding the centre of the object trace
     prior=np.zeros(data.shape[0])
     prior[borderPix:-borderPix]=1
@@ -2410,11 +2415,19 @@ def finalExtraction(data, subFrac = 0.8):
             iMin=0
         if iMax > data.shape[1]-1:
             iMax=data.shape[1]-1
-        profCentres[i], profSigmas[i]=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
+        try:
+            profCentres[i], profSigmas[i]=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
+        except:
+            print("huh")
+            import IPython
+            IPython.embed()
+            sys.exit()
 
     # Fit for trace centre, just use median for trace width sigma (doesn't vary by that much)
     x=np.arange(data.shape[1])
     mask=np.greater(profCentres, 0) # fitProfile returns -99 for completely masked data
+    if mask.sum() == 0:
+        return None, None, None
 
     # Make trace of order 4
     # coeffs=np.polyfit(x[mask], profCentres[mask], order=4)
