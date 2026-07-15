@@ -2445,12 +2445,17 @@ def finalExtraction(data, subFrac = 0.8):
         if iMax > data.shape[1]-1:
             iMax=data.shape[1]-1
         try:
-            profCentres[i], profSigmas[i]=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
+            stuff=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
         except:
-            print("huh")
+            print("fitProfile problem")
             import IPython
             IPython.embed()
             sys.exit()
+        if len(stuff[1]) == 0:
+            return None, None, None
+        else:
+            profCentres[i]=stuff[0]
+            profSigmas[i]=stuff[1]
 
     # Fit for trace centre, just use median for trace width sigma (doesn't vary by that much)
     x=np.arange(data.shape[1])
