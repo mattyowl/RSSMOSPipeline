@@ -42,7 +42,7 @@ def makeParser():
     parser.add_argument("maskName", help="Use 'all' to reduce all data found under rawDir/, or 'list' to list all masks (by object) found under rawDir/. The maskName is made from the keyword combination OBJECT_MASKID found in the .fits headers.")
     parser.add_argument("-t", "--threshold", dest="threshold", default=3, help="Threshold in sigma used for the MOS slit finding algorithm - check that all slits are being found using e.g. masterflat_0.fits and the .reg files produced by the pipeline (default = 3; increase this value if some slits are getting divided; decrease if slits missing). This option only applies to MOS masks.")
     parser.add_argument("-T", "--longslit-threshold", dest="longslitThreshold", default=2.0, help="Threshold used for the longslit pseudo-slit finding algorithm, in sigma (i.e., for detecting object traces).")
-    parser.add_argument("-i", "--iterative-extraction", dest="iterativeMethod", action='store_true', help = "Use the iterative spectral extraction method.")
+    parser.add_argument("-i", "--iterative-extraction", dest="iterativeMethod", action='store_true', help = "Use the iterative spectral extraction method. Ignored (automatically disabled) if --kelson-sky is used, since the data are then already sky-subtracted.")
     parser.add_argument("-f", "--skysub-fraction", dest="subFrac", default=0.8, help="Fraction of the sky background to be subtracted in each iteration of the iterative spectral extraction algorithm (default=0.8; increase this value for faster convergence). This only has an effect if the -i switch is also used.")
     parser.add_argument("-e", "--exclude-masks", dest="excludeMasks", default="", help="Names of masks to exclude (if using maskName = 'all'). Separate mask names with , but no spaces (e.g., -e M1,M2). Useful for avoiding inclusion of e.g., standard stars.")
     parser.add_argument("-s", "--slits", dest="extensionsList", default="all", help="Reduce the data corresponding to the given slit names only. Separate slit names with , but no spaces (e.g., -s SLIT9,SLIT15).")
@@ -51,6 +51,8 @@ def makeParser():
     parser.add_argument("-n", "--no-flat", dest="noFlat", default=False, action='store_true', help="If no flats, skips flag fielding. Likely will need to be run with -F.")
     parser.add_argument("-m", "--model-arcs-dir", dest="modelArcsDir", default=None,
                         help = "If given, look in this directory for wavelength calibration model arc spectra, in addition to the default built-in location.")
+    parser.add_argument("-k", "--kelson-sky", dest="kelsonSky", default=False, action='store_true',
+                        help = "EXPERIMENTAL (prototype): perform Kelson (2003)-style sky subtraction on the un-rectified 2D frames (i.e., before resampling), which reduces sky-line residuals. The rectified 2D spectra written out (and hence all of the extracted spectra) are then already sky-subtracted, so the sky-based wavelength calibration diagnostics are not meaningful in this mode. Check the diagnostics/kelsonSky_*.png plots.")
     parser.add_argument("-v", "--version", action = 'version', version = '%(prog)s' + ' %s' % (RSSMOSPipeline.__version__))
 
     return parser
@@ -99,6 +101,12 @@ if __name__ == '__main__':
     logger.info("RSSMOSPipeline version = %s" % (RSSMOSPipeline.__version__))
     logger.info("started: %s" % (datetime.datetime.now().isoformat()))
     logger.info("parameters: %s" % str(args))
+
+    # Kelson-style sky subtraction (-k) removes the sky before extraction, so the iterative sky
+    # subtraction used during extraction (-i) must not also run - turn it off automatically
+    if args.kelsonSky == True and iterativeMethod == True:
+        logger.warning("--kelson-sky enabled: disabling iterative sky subtraction (-i), as the data are already sky-subtracted")
+        iterativeMethod=False
             
     # Sort out what's what...
     infoDict=RSSMOSTools.getImageInfo(rawDir, modelArcsDir = modelArcsDir)
@@ -186,7 +194,7 @@ if __name__ == '__main__':
                 logger.warning("flat fielding failed on mask '%s' - try different threshold or longslitThreshold?" % (maskName))
                 continue
         
-        RSSMOSTools.wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList, modelArcsDir = modelArcsDir)
+        RSSMOSTools.wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList, modelArcsDir = modelArcsDir, kelsonSky = args.kelsonSky)
 
         RSSMOSTools.extractAndStackSpectra(maskDict, outDir, extensionsList = extensionsList, 
                                            iterativeMethod = iterativeMethod, subFrac = subFrac)

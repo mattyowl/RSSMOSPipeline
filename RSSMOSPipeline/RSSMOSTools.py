@@ -1441,8 +1441,106 @@ def findWavelengthCalibration(arcData, modelFileName, sigmaCut = 3.0, thresholdS
     return resultDict
 
 #-------------------------------------------------------------------------------------------------------------
+def fitSkyModel(data, wavelengthsMap, oversample = 3.0, nSigma = 3.0, maxIterations = 5):
+    """Kelson (2003)-style supersampled sky model (PROTOTYPE).
+
+    Fits the sky as a smooth 1d function of wavelength, S(lambda), using the true per-pixel wavelengths
+    of the *un-rectified* frame (wavelengthsMap). Because the tilted sky lines are sampled at many
+    slightly different sub-pixel wavelengths across the rows of the slit, the sky is effectively
+    supersampled, and can be subtracted *before* any resampling is done. It is the resampling of sharp,
+    tilted sky lines that introduces the sky-line residuals we are trying to avoid.
+
+    The sky in each (fine) wavelength bin is estimated with a robust median, and object flux and cosmic
+    rays are removed by iterative upper-sigma clipping: at any given wavelength the object occupies only
+    a few rows of the slit, so it is a minority and is rejected.
+
+    Returns a 2d sky model with the same shape as data (evaluated at each pixel's true wavelength).
+
+    """
+
+    fullLam=np.asarray(wavelengthsMap, dtype = float).ravel()
+    lam=fullLam.copy()
+    flux=np.asarray(data, dtype = float).ravel()
+
+    # Ignore blank/chip-gap pixels and anything non-finite
+    good=np.logical_and(np.isfinite(lam), np.isfinite(flux))
+    good=np.logical_and(good, np.not_equal(flux, 0))
+    if good.sum() < 50:
+        return np.zeros(data.shape)
+    lam=lam[good]
+    flux=flux[good]
+
+    lamMin=lam.min()
+    lamMax=lam.max()
+    if lamMax <= lamMin:
+        return np.zeros(data.shape)
+
+    # Supersampled wavelength bins (finer than the native per-pixel dispersion)
+    nBins=max(int(data.shape[1]*oversample), 10)
+    binEdges=np.linspace(lamMin, lamMax, nBins+1)
+    binCentres=0.5*(binEdges[:-1]+binEdges[1:])
+    binIdx=np.clip(np.digitize(lam, binEdges)-1, 0, nBins-1)
+
+    # Iteratively estimate the sky in each bin, rejecting positive outliers (object flux, cosmic rays)
+    keep=np.ones(lam.shape[0], dtype = bool)
+    skyBin=np.zeros(nBins)
+    validBins=np.zeros(nBins, dtype = bool)
+    for iteration in range(maxIterations):
+        counts=np.bincount(binIdx[keep], minlength = nBins)
+        # ndimage measurement functions treat label 0 as background, so shift bin labels by +1
+        skyBin=np.asarray(ndimage.median(flux[keep], labels = binIdx[keep]+1,
+                                         index = np.arange(1, nBins+1)), dtype = float)
+        validBins=np.greater(counts, 0)
+        if validBins.sum() < 4:
+            return np.zeros(data.shape)
+        model=np.interp(lam, binCentres[validBins], skyBin[validBins])
+        resid=flux-model
+        sigma=np.std(resid[keep])
+        if sigma <= 0:
+            break
+        newKeep=np.less(resid, nSigma*sigma)
+        if np.array_equal(newKeep, keep):
+            break
+        keep=newKeep
+
+    # Recompute the per-bin sky with the final set of kept pixels, so the model matches the final mask
+    counts=np.bincount(binIdx[keep], minlength = nBins)
+    skyBin=np.asarray(ndimage.median(flux[keep], labels = binIdx[keep]+1,
+                                     index = np.arange(1, nBins+1)), dtype = float)
+    validBins=np.greater(counts, 0)
+    if validBins.sum() < 4:
+        return np.zeros(data.shape)
+
+    # Final model, evaluated at every pixel's true wavelength
+    skyModel2d=np.interp(fullLam, binCentres[validBins], skyBin[validBins]).reshape(data.shape)
+    skyModel2d[np.less(skyModel2d, 0)]=0.0
+
+    return skyModel2d
+
+#-------------------------------------------------------------------------------------------------------------
+def plotKelsonSky(data, skyModel2d, wavelengthsMap, diagnosticsDir, label):
+    """Diagnostic plot for the Kelson-style sky subtraction: shows the central row of the slit, the fitted
+    sky model, and the residual after subtraction.
+
+    """
+
+    if os.path.exists(diagnosticsDir) == False:
+        os.makedirs(diagnosticsDir)
+    mid=int(data.shape[0]/2)
+    plt.figure(figsize=(12, 6))
+    plt.plot(wavelengthsMap[mid], data[mid], 'k-', label = 'data (central row)')
+    plt.plot(wavelengthsMap[mid], skyModel2d[mid], 'r-', label = 'sky model')
+    plt.plot(wavelengthsMap[mid], data[mid]-skyModel2d[mid], 'b-', label = 'residual')
+    plt.xlabel("Wavelength (Angstroms)")
+    plt.ylabel("Counts")
+    plt.legend()
+    plt.title(label)
+    plt.savefig(diagnosticsDir+os.path.sep+"kelsonSky_"+label+".png")
+    plt.close()
+
+#-------------------------------------------------------------------------------------------------------------
 def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, extensionsList = "all",
-                                  makeDiagnosticPlots = False):
+                                  makeDiagnosticPlots = False, kelsonSky = False, diagnosticsDir = None):
     """Applies the wavelength calibration, and rectification, to all extensions of inFileName, writing 
     output to outFileName. The wavelength calibration is provided in wavelengthCalibDict, where each key
     corresponds to each extension number (see findWavelengthCalibration)
@@ -1484,7 +1582,16 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
                     sys.exit()
                 wavelengthsMap[y]=wavelengthCalibPoly(np.arange(data.shape[1]))
             #astImages.saveFITS("wavelengthsMap.fits", wavelengthsMap, None)
-            
+
+            # Optional Kelson (2003)-style sky subtraction, done on the native (un-rectified) frame,
+            # before any resampling. This is what avoids interpolation-induced sky-line residuals.
+            if kelsonSky == True:
+                skyModel2d=fitSkyModel(data, wavelengthsMap)
+                if diagnosticsDir is not None:
+                    plotKelsonSky(data, skyModel2d, wavelengthsMap, diagnosticsDir,
+                                  os.path.split(outFileName)[-1].replace(".fits", "")+"_"+extension)
+                data=data-skyModel2d
+
             # How we would want our wavelength map to look after applying some transformation
             # To make things easier later, make a linear wavelength scale
             wavelengths_centreRow=wavelengthsMap[int(wavelengthsMap.shape[0]/2)]
@@ -1542,7 +1649,7 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
     img.writeto(outFileName, overwrite = True)
     
 #-------------------------------------------------------------------------------------------------------------
-def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all", modelArcsDir = None):
+def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all", modelArcsDir = None, kelsonSky = False):
     """Finds 2d wavelength calibration from arc frames, applies to arc frames and object frames, rectifying
     them and also interpolating to a linear wavelength scale to make life easier later.
     
@@ -1625,8 +1732,9 @@ def wavelengthCalibration2d(maskDict, outDir, extensionsList = "all", modelArcsD
         cutArcPath=maskDict['cutArcDict'][fileName]                
         cutPath=makeOutputFileName(fileName, "c", outDir)
         rectPath=makeOutputFileName(fileName, "rwc", outDir)
-        wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][cutArcPath], 
-                                      extensionsList = extensionsList)        
+        wavelengthCalibrateAndRectify(cutPath, rectPath, maskDict['wavelengthCalib'][cutArcPath],
+                                      extensionsList = extensionsList, kelsonSky = kelsonSky,
+                                      diagnosticsDir = diagnosticsDir)
    
 #-------------------------------------------------------------------------------------------------------------
 def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 3.):
