@@ -16,6 +16,10 @@ MOS reduction on selected slits
     Setup MOS
     Run reduction on selected slits   reduced_MOS_selected   ACT-CL_J0034.4+0225_P002131N01   SLIT10
 
+MOS reduction with Kelson sky subtraction
+    Setup MOS
+    Run kelson reduction on selected slits   reduced_MOS_kelson   ACT-CL_J0034.4+0225_P002131N01   SLIT10
+
 MOS reduction using slit file
     Setup MOS
     Make slit file   10   988   1026

@@ -117,6 +117,11 @@ class RSSMOSPipelineTests(object):
         self._run_command(args)
 
 
+    def run_kelson_reduction_on_selected_slits(self, reducedDir = None, maskName = None, slits = None):
+        args=['rss_mos_reducer', self.productDir, reducedDir, maskName, '-k', '-s', slits]
+        self._run_command(args)
+
+
     def cross_match(self, inCatalogFileName, outCatalogFileName, radiusArcmin = 1.0):
         """Cross matches input and output source catalogs.
         
