@@ -94,8 +94,9 @@ Running the pipeline
 
 
 4. The ``rss_mos_visual_inspector`` tool can be used to look at the 1D spectra, compare to template
-   spectra from SDSS, and measure redshifts. This needs the ``tkinter`` module to be installed, and
-   for the ``matplotlib` backend to be set to ``TkAgg``.
+   spectra from SDSS, and measure redshifts. This is a Qt application: it needs a Qt binding to be
+   installed (``PyQt6`` is pulled in as a dependency, but ``PySide6``, ``PyQt5`` or ``PySide2`` also
+   work, as the interface is built on top of ``matplotlib``'s Qt backend).
 
    Run this using, e.g.::
 

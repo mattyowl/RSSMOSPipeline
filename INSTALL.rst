@@ -5,6 +5,7 @@
 * matplotlib
 * numpy
 * scipy
+* PyQt6 (only needed for the ``rss_mos_visual_inspector`` GUI; any Qt binding supported by matplotlib will do)
 
 The install script (see below) should install the needed modules automatically if they are not already on your system.
 
