@@ -2637,7 +2637,7 @@ def finalExtraction(data, subFrac = 0.8, subtractSky = True):
             import IPython
             IPython.embed()
             sys.exit()
-        if len(stuff[1]) == 0:
+        if stuff == (-99, -99) or len(stuff[1]) == 0:
             return None, None, None
         else:
             profCentres[i]=stuff[0]
@@ -2741,7 +2741,7 @@ def fitRunningProfile(data):
         if iMax > data.shape[1]-1:
             iMax=data.shape[1]-1
         stuff=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
-        if len(stuff[1]) == 0:
+        if stuff == (-99, -99) or len(stuff[1]) == 0:
             return None
         profCentres[i]=stuff[0]
         profSigmas[i]=stuff[1]
