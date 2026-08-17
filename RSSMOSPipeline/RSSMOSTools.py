@@ -2085,7 +2085,11 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         directory.
         
     It seems like method (2) works best (Oct 2016).
-    
+
+    In addition to the above, two further 1d spectra are extracted from the stacked 2d spectrum: an
+    alternative extraction that fits for the object trace (placed under outDir/1DSpec_altExtract/), and
+    a Horne (1986) optimal extraction (placed under outDir/1DSpec_horneExtract/).
+
     If iterativeMethod = True, then an iterative method for spectral extraction is used. In which
     case _iterative is added to the name of the output directory.
     
@@ -2120,6 +2124,10 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
     finalExtractSpecDir=outDir+os.path.sep+"1DSpec_altExtract"
     if os.path.exists(finalExtractSpecDir) == False:
         os.makedirs(finalExtractSpecDir)
+
+    horneExtractSpecDir=outDir+os.path.sep+"1DSpec_horneExtract"
+    if os.path.exists(horneExtractSpecDir) == False:
+        os.makedirs(horneExtractSpecDir)
 
     # Log checks of wavelength calibration
     skyWavelengthCalibCheckList=[]
@@ -2294,6 +2302,15 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
             # outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
             outFileName=finalExtractSpecDir+os.path.sep+"1D_altExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
             write1DSpectrum(signalAlt, skyAlt, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
+
+        # Horne (1986) optimal extraction, also run on the 2d stacked spectrum
+        signalHorne, skyHorne, skySubbed2dHorne=horneExtraction(med, subFrac = subFrac)
+        if signalHorne is None:
+            logger.info("Horne extraction failed for %s - continuing" % (extension))
+        else:
+            outFileName=horneExtractSpecDir+os.path.sep+"1D_horneExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
+            write1DSpectrum(signalHorne, skyHorne, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'],
+                            mask = chipGapMask)
 
         # Write 2d combined spectrum
         outFileName=stackExtractSpecDir+os.path.sep+"2D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
@@ -2519,6 +2536,144 @@ def finalExtraction(data, subFrac = 0.8):
     #skySubbed2d[np.where(chipGapMask == 1)]=0.
     
     return signal, sky, skySubbed2d
+
+#-------------------------------------------------------------------------------------------------------------
+def fitRunningProfile(data):
+    """Fits the object trace (allowing its centre to vary along the slit) and returns a normalised 2d
+    Gaussian spatial profile with the same shape as data. This is the smooth object profile P(x, lambda)
+    needed by the Horne (1986) optimal extraction.
+
+    Returns the 2d profile, or None if the trace could not be measured (e.g., everything masked).
+
+    """
+
+    # Find the chip gaps and make a mask (same approach as finalExtraction)
+    lowMaskValue=2.0
+    minPix=1000
+    chipGapMask=np.array(np.less(data, lowMaskValue), dtype = float)  # flags chip gaps as noise
+    segmentationMap, numObjects=ndimage.label(chipGapMask)
+    sigPixMask=np.equal(chipGapMask, 1)
+    objIDs=np.unique(segmentationMap)
+    objNumPix=ndimage.sum(sigPixMask, labels = segmentationMap, index = objIDs)
+    for objID, nPix in zip(objIDs, objNumPix):
+        if nPix < minPix:
+            chipGapMask[np.equal(segmentationMap, objID)]=0.0
+    wn2d=np.zeros(data.shape)+chipGapMask
+
+    # Running profile measurement - fit centre and width in the spatial direction, column by column
+    profCentres=np.zeros(data.shape[1])
+    profSigmas=np.zeros(data.shape[1])
+    for i in range(data.shape[1]):
+        runWidth=100
+        iMin=i-runWidth
+        iMax=i+runWidth
+        if iMin < 0:
+            iMin=0
+        if iMax > data.shape[1]-1:
+            iMax=data.shape[1]-1
+        stuff=fitProfile(data[:, iMin:iMax], wn2d[:, iMin:iMax])
+        if len(stuff[1]) == 0:
+            return None
+        profCentres[i]=stuff[0]
+        profSigmas[i]=stuff[1]
+
+    # Fit for trace centre with a low-order polynomial, use median trace width (doesn't vary much)
+    x=np.arange(data.shape[1])
+    mask=np.greater(profCentres, 0)   # fitProfile returns -99 for completely masked data
+    if mask.sum() == 0:
+        return None
+    coeffs=np.polynomial.Polynomial.fit(x[mask], profCentres[mask], deg = 4)
+    traceCentre=coeffs(x)             # evaluate over every column, so profile is defined everywhere
+    traceSigma=np.median(profSigmas[mask])
+
+    # Make the 2d running Gaussian profile
+    runningProf=np.zeros(data.shape)
+    y=np.arange(data.shape[0])
+    for i in range(data.shape[1]):
+        runningProf[:, i]=np.exp(-((y-traceCentre[i])**2)/(2*traceSigma**2))
+
+    return runningProf
+
+#-------------------------------------------------------------------------------------------------------------
+def horneExtraction(data, subFrac = 0.8, gain = 1.0, sigmaClip = 5.0, maxIterations = 5):
+    """Optimal spectral extraction following Horne (1986; PASP, 98, 609).
+
+    The sky is estimated and subtracted using the same iterative solver as the other extraction methods
+    (with the fitted object trace), and the object flux is then extracted using inverse-variance weighting
+    of the pixels along each column, weighted by the normalised spatial profile P. Cosmic rays (and other
+    outliers) are rejected iteratively by comparing each pixel to the profile model, revising the variance
+    estimate each pass.
+
+    For each wavelength column the optimally-extracted flux is:
+
+        f = sum(M * P * D / V) / sum(M * P**2 / V)
+
+    where D is the sky-subtracted data, P the normalised spatial profile (sum over spatial pixels = 1),
+    V the pixel variance, and M a good-pixel mask (1 = good, 0 = rejected). The variance is modelled as
+    V = sigma0**2 + |P*f + sky| / gain, i.e. a read-noise/background floor plus a photon-noise term from
+    the total (object + sky) counts. sigma0 is estimated from the sky-subtracted data away from the trace,
+    and gain (electrons per count) defaults to 1, which is adequate here as the input has already been
+    flat-fielded and stacked.
+
+    Returns the extracted signal, sky (both 1d) and the 2d sky-subtracted spectrum, matching the interface
+    of finalExtraction. Returns (None, None, None) if the object trace could not be measured.
+
+    """
+
+    logger.info("Horne optimal extraction")
+
+    # Smooth object spatial profile from the fitted trace
+    runningProf=fitRunningProfile(data)
+    if runningProf is None:
+        return None, None, None
+
+    # Estimate the sky (and flag cosmic rays) using the iterative solver, with our object trace
+    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf,
+                                                    iterateProfile = False, throwAwayRows = 0)
+
+    # Sky-subtracted data and initial good-pixel mask (0 where iterative extraction flagged CRs/chip gaps)
+    sky2d=np.array([sky]*data.shape[0])
+    D=data-sky2d
+    M=np.array(np.logical_not(np.ma.getmaskarray(mData)), dtype = float)
+
+    # Normalise the spatial profile so that it sums to 1 over the spatial direction in each column
+    P=np.array(runningProf)
+    P[np.less(P, 0)]=0.0
+    profNorm=P.sum(axis = 0)
+    goodProf=np.greater(profNorm, 0)
+    P[:, goodProf]=P[:, goodProf]/profNorm[goodProf]
+
+    # Read-noise/background floor from the sky-subtracted data, away from bright (source) pixels
+    noiseMask=maskNoisyData(D)
+    noiseSampleMask=np.logical_and(np.logical_not(noiseMask), np.greater(M, 0))
+    if noiseSampleMask.sum() > 0:
+        sigma0=np.std(D[noiseSampleMask])
+    else:
+        sigma0=np.std(D)
+    if sigma0 <= 0:
+        sigma0=1.0
+    varFloor=sigma0**2
+
+    # Iterate: revise variance, reject the worst outlier per column, re-extract
+    tiny=1e-9
+    f=(M*D).sum(axis = 0)   # standard (unweighted) extraction as a starting point
+    for k in range(maxIterations):
+        model2d=P*f
+        V=varFloor+np.abs(model2d+sky2d)/gain
+        V[np.less(V, tiny)]=tiny
+        # Reject at most one pixel per column per iteration (Horne's conservative CR rejection)
+        stdResid2=M*(D-model2d)**2/V
+        worstRow=np.argmax(stdResid2, axis = 0)
+        cols=np.arange(data.shape[1])
+        reject=np.greater(stdResid2[worstRow, cols], sigmaClip**2)
+        M[worstRow[reject], cols[reject]]=0.0
+        # Optimal extraction with the current mask and variance
+        denom=(M*P**2/V).sum(axis = 0)
+        goodCol=np.greater(denom, 0)
+        f=np.zeros(data.shape[1])
+        f[goodCol]=(M*P*D/V).sum(axis = 0)[goodCol]/denom[goodCol]
+
+    return f, sky, D
 
 #-------------------------------------------------------------------------------------------------------------
 def write1DSpectrum(signal, sky, wavelength, outFileName, maskRA, maskDec, mask = None):

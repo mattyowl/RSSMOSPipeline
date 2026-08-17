@@ -43,7 +43,7 @@ Running the pipeline
 3. After the pipeline has finished, you will find data at various stages of reduction under the
    ``reducedData`` dir (``reduced`` for the above example). At the moment, this is not cleaned up.
 
-   Three methods are used for extracting spectra:
+   Four methods are used for extracting spectra:
 
    1. Individual 1D spectra are extracted from each science frame and then stacked. This might be
       desirable if object traces shift from frame-to-frame. These are placed under::
@@ -61,6 +61,15 @@ Running the pipeline
       slit. These are placed under::
 
         `reducedDir/OBJECT_MASKID/1DSpec_altExtract/`.
+
+   4. Optimal spectral extraction following `Horne (1986)
+      <https://ui.adsabs.harvard.edu/abs/1986PASP...98..609H/abstract>`_. Like method 3, this runs on
+      the 2D stacked spectrum produced by method 2: the sky is subtracted using the iterative method
+      and the fitted object trace, then the object flux is extracted using inverse-variance weighting
+      of the pixels in each column, weighted by the (normalised) spatial profile, with iterative
+      rejection of cosmic rays. These are placed under::
+
+        `reducedDir/OBJECT_MASKID/1DSpec_horneExtract/`.
 
    Currently method 2 seems to work best, but output from all methods are made when running the
    pipeline, so you can choose between them afterwards.
