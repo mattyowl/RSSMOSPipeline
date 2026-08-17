@@ -52,7 +52,7 @@ def makeParser():
     parser.add_argument("-m", "--model-arcs-dir", dest="modelArcsDir", default=None,
                         help = "If given, look in this directory for wavelength calibration model arc spectra, in addition to the default built-in location.")
     parser.add_argument("-k", "--kelson-sky", dest="kelsonSky", default=False, action='store_true',
-                        help = "EXPERIMENTAL (prototype): perform Kelson (2003)-style sky subtraction on the un-rectified 2D frames (i.e., before resampling), which reduces sky-line residuals. The rectified 2D spectra written out (and hence all of the extracted spectra) are then already sky-subtracted, so the sky-based wavelength calibration diagnostics are not meaningful in this mode. Check the diagnostics/kelsonSky_*.png plots.")
+                        help = "EXPERIMENTAL (prototype): perform Kelson (2003)-style sky subtraction on the un-rectified 2D frames (i.e., before resampling), which reduces sky-line residuals. The extraction then does not subtract sky again; the fitted sky model is carried through into the SKYSPEC column of the output 1D spectra and used for the sky-based wavelength calibration checks. See also the diagnostics/kelsonSky_*.png plots.")
     parser.add_argument("-v", "--version", action = 'version', version = '%(prog)s' + ' %s' % (RSSMOSPipeline.__version__))
 
     return parser
@@ -196,6 +196,7 @@ if __name__ == '__main__':
         
         RSSMOSTools.wavelengthCalibration2d(maskDict, outDir, extensionsList = extensionsList, modelArcsDir = modelArcsDir, kelsonSky = args.kelsonSky)
 
-        RSSMOSTools.extractAndStackSpectra(maskDict, outDir, extensionsList = extensionsList, 
-                                           iterativeMethod = iterativeMethod, subFrac = subFrac)
+        RSSMOSTools.extractAndStackSpectra(maskDict, outDir, extensionsList = extensionsList,
+                                           iterativeMethod = iterativeMethod, subFrac = subFrac,
+                                           subtractSky = not args.kelsonSky)
  

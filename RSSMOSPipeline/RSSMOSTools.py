@@ -1629,6 +1629,24 @@ def wavelengthCalibrateAndRectify(inFileName, outFileName, wavelengthCalibDict, 
             header['CD1_1']=FITSWavelengthScale
             header['CDELT1']=FITSWavelengthScale
             header['CUNIT1']='Angstroms'
+
+            # In Kelson mode, also rectify the sky model and store it (as a 1d spectrum on the same linear
+            # wavelength scale) in a companion extension, so the extraction can put it back into the output
+            # spectra (SKYSPEC) and use it for the sky-based wavelength calibration check. The extension name
+            # deliberately contains no "SLIT", so the extraction's slit scan ignores it.
+            if kelsonSky == True:
+                rectSky=np.zeros(data.shape)
+                for y in range(data.shape[0]):
+                    try:
+                        tck=interpolate.splrep(wavelengthsMap[y], skyModel2d[y])
+                        rectSky[y]=interpolate.splev(rectWavelengthsMap[y], tck, ext = 1)
+                    except:
+                        rectSky[y]=0.0
+                sky1d=np.median(rectSky, axis = 0)
+                skyExtName=extension.replace("SLIT", "SKYMODEL")
+                if skyExtName in [hdu.name for hdu in img]:
+                    del img[skyExtName]
+                img.append(pyfits.ImageHDU(data = sky1d, name = skyExtName))
                 
             ## Sanity check plot: linear wavelength scale
             #if makeDiagnosticPlots == True:
@@ -1815,7 +1833,7 @@ def measureProfile(data, mask, minTraceWidth = 4., halfBlkSize = 50, sigmaCut = 
     
 #-------------------------------------------------------------------------------------------------------------
 def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runningProfile = None, \
-                                iterateProfile = False, throwAwayRows = 2):
+                                iterateProfile = False, throwAwayRows = 2, subtractSky = True):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This is somewhat similar to the Horne optimal extraction algorithm. We solve:
 
@@ -1898,8 +1916,11 @@ def iterativeWeightedExtraction(data, maxIterations = 1000, subFrac = 0.8, runni
             # This should take care of any rubbish at slit edges causing oversubtracted sky
             skyMask=maskNoisyData(b)
             skyMask=np.equal(skyMask, False)
-            A[1]=np.array(skyMask, dtype = int)#1.#(1.-prof) 
+            A[1]=np.array(skyMask, dtype = int)#1.#(1.-prof)
             #A[1]=skyMask2d[:, i]
+            # If the sky was already removed earlier (e.g. Kelson mode), don't fit/subtract it again
+            if subtractSky == False:
+                A[1]=0.0
             # CR masking
             wn=wn2d[:, i]
             for j in range(b.shape[0]):
@@ -1980,7 +2001,7 @@ def identifySky(data):
 
 #-------------------------------------------------------------------------------------------------------------
 def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 3.0, profSigmaPix = 4.0, \
-                       throwAwayRows = 2):
+                       throwAwayRows = 2, subtractSky = True):
     """Extract 1d spectrum of object, sky, and find noisy pixels affected by cosmic rays while we're at it.
     This was (supposed) to be similar to the Horne optimal extraction. We solve:
 
@@ -2061,8 +2082,11 @@ def weightedExtraction(data, medColumns = 10, thresholdSigma = 30.0, sigmaCut = 
             w[:, 0]=prof.reshape(w[:, 0].shape)     # signal weight - varies across rows
             # Sky should be same everywhere... if something stands out, it isn't sky, so zap
             # This should take care of any rubbish at slit edges causing oversubtracted sky
-            w[:, 1]=skyMask2d[:, i]#np.array(skyMask, dtype = int)#1.#(1.-prof) 
+            w[:, 1]=skyMask2d[:, i]#np.array(skyMask, dtype = int)#1.#(1.-prof)
             #w[:, 1]=1                               # sky weight - needs to be the same across all rows
+            # If the sky was already removed earlier (e.g. Kelson mode), don't fit/subtract it again
+            if subtractSky == False:
+                w[:, 1]=0.0
             wn=wn2d[:, i]
             for j in range(v.shape[0]):
                 w[j, 2+j]=wn[j]                     # noise weights - if 1, zap that pixel (CR or bad)
@@ -2160,6 +2184,9 @@ def checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5, mismatchLi
     cdelt=wavelengths[1]-wavelengths[0]
     crval1=wavelengths[0]
     featureTable, segMap=detectLines(bckSubSky, featureMinPix = featureMinPix, numBins = 8)
+    # No sky lines to match against (e.g. a blank or already sky-subtracted spectrum)
+    if len(featureTable) == 0:
+        return 0.0, 0
     featureTable.add_column(atpy.Column(featureTable['x_centreRow']*cdelt+crval1, 'wavelength'))
     diffs=[]
     usedSkyLines=[]
@@ -2175,11 +2202,15 @@ def checkWavelengthCalibUsingSky(sky, wavelengths, featureMinPix = 5, mismatchLi
             if abs(diff[mask]) < mismatchLimit:
                 diffs.append(diff[mask])
                 usedSkyLines.append(c)
-    
+
+    if len(diffs) == 0:
+        return 0.0, 0
+
     return np.median(diffs), len(diffs)
 
 #-------------------------------------------------------------------------------------------------------------
-def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMethod = False, subFrac = 0.4):
+def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMethod = False, subFrac = 0.4,
+                           subtractSky = True):
     """Extracts and stacks spectra from science frames which have already been wavelength calibrated.
         
     Two methods are used for extracting spectra:
@@ -2290,11 +2321,18 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
                 if np.nonzero(data)[0].shape[0] > 0:
                     
                     if iterativeMethod == True:
-                        signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac)
+                        signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, subtractSky = subtractSky)
                     else:
                         t0=time.time()
-                        signal, sky, mData=weightedExtraction(data)
+                        signal, sky, mData=weightedExtraction(data, subtractSky = subtractSky)
                         t1=time.time()
+                    # In Kelson mode the sky was subtracted before extraction, so the extraction returns a
+                    # zero sky. Retrieve the sky that was actually removed (stored in a companion extension)
+                    # and use that as the sky for this frame.
+                    if subtractSky == False:
+                        skyExtName=extension.replace("SLIT", "SKYMODEL")
+                        if skyExtName in [hdu.name for hdu in img]:
+                            sky=img[skyExtName].data
                     CRMaskedDataCube.append(mData)
                     signalList.append(signal)
                     skyList.append(sky)
@@ -2321,10 +2359,11 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
             logger.warning("failed to construct CRMaskedDataCube - signalList empty - skipping %s" % (extension))
             continue
         
-        # Wavelength calib diagnostic: does the sky line up from each science frame?
+        # Wavelength calib diagnostic: does the sky line up from each science frame? In Kelson mode the sky
+        # here is the model that was subtracted (stored per frame), so this check remains meaningful.
         fluxMax=0
         for sky, wavelengths, header in zip(skyList, wavelengthsList, headersList):
-            if sky.shape[0] > 0:
+            if sky.shape[0] > 0 and np.median(sky) != 0:
                 flux=sky/np.median(sky)
                 if flux.max() > fluxMax:
                     fluxMax=flux.max()
@@ -2338,7 +2377,7 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         plt.ylabel("Relative Flux")
         plt.savefig(diagnosticsDir+os.path.sep+"skyCheck_"+extension+".png")
         plt.close()
-                    
+
         # Make stacked spectrum - interpolate onto common wavelength scale, then take median
         # We could make this fancier (noise weighting etc.)...
         signalArr=np.array(signalList)
@@ -2371,6 +2410,16 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         projDataCube=[]
         refWavelengths=wavelengthsList[0]
         refHeader=headersList[0]
+
+        # In Kelson mode, build the stacked sky model (what was subtracted) on the reference wavelength grid,
+        # so it can be written into the 2D-stack-based output spectra (SKYSPEC) and used for the calib check.
+        kelsonSkyRef=None
+        if subtractSky == False:
+            projSky=[]
+            for skv, wv in zip(skyList, wavelengthsList):
+                projSky.append(np.interp(refWavelengths, wv, skv))
+            kelsonSkyRef=np.median(projSky, axis = 0)
+
         for data, wavelengths in zip(CRMaskedDataCube, wavelengthsList):
             if projDataCube == []:
                 projDataCube.append(data)
@@ -2390,9 +2439,12 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         # Very slow if use the masked array below...
         med=np.array(np.ma.median(projDataCube, axis = 0))   
         if iterativeMethod == True:
-            signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac)
+            signal, sky, mData=iterativeWeightedExtraction(med, subFrac = subFrac, subtractSky = subtractSky)
         else:
-            signal, sky, mData=weightedExtraction(med)       
+            signal, sky, mData=weightedExtraction(med, subtractSky = subtractSky)
+        # In Kelson mode, report the sky that was subtracted earlier (rather than the ~zero residual)
+        if subtractSky == False and kelsonSkyRef is not None:
+            sky=kelsonSkyRef
         # Put chipGapMask into 1d spectra
         chipGapMask=np.median(makeChipGapMask(med), axis = 0)
         # outFileName=stackExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
@@ -2402,20 +2454,24 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         
         # Experimenting with a method that will handle running profile
         t0=time.time()
-        signalAlt, skyAlt, skySubbed2dAlt=finalExtraction(med, subFrac = subFrac)
+        signalAlt, skyAlt, skySubbed2dAlt=finalExtraction(med, subFrac = subFrac, subtractSky = subtractSky)
         if signalAlt is None:
             logger.info("alt extraction failed for %s - continuing" % (extension))
         else:
             t1=time.time()
+            if subtractSky == False and kelsonSkyRef is not None:
+                skyAlt=kelsonSkyRef
             # outFileName=finalExtractSpecDir+os.path.sep+"1D_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+"_final.fits"
             outFileName=finalExtractSpecDir+os.path.sep+"1D_altExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
             write1DSpectrum(signalAlt, skyAlt, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'])
 
         # Horne (1986) optimal extraction, also run on the 2d stacked spectrum
-        signalHorne, skyHorne, skySubbed2dHorne=horneExtraction(med, subFrac = subFrac)
+        signalHorne, skyHorne, skySubbed2dHorne=horneExtraction(med, subFrac = subFrac, subtractSky = subtractSky)
         if signalHorne is None:
             logger.info("Horne extraction failed for %s - continuing" % (extension))
         else:
+            if subtractSky == False and kelsonSkyRef is not None:
+                skyHorne=kelsonSkyRef
             outFileName=horneExtractSpecDir+os.path.sep+"1D_horneExtract_"+dateObs+"_"+maskDict['objName'].replace(" ", "_")+"_"+maskDict['maskID']+"_"+extension+".fits"
             write1DSpectrum(signalHorne, skyHorne, refWavelengths, outFileName, maskDict['RA'], maskDict['DEC'],
                             mask = chipGapMask)
@@ -2457,9 +2513,14 @@ def extractAndStackSpectra(maskDict, outDir, extensionsList = "all", iterativeMe
         logFile.write("%s\t%.3f\t%d\n" % (extension, medianOffset, numLines))
         offsets.append(medianOffset)
     offsets=np.array(offsets)
-    RMS=np.sqrt(np.mean(offsets**2))
-    logFile.write("all slits median\t%.3f\t%d\n" % (np.median(offsets), len(offsets)))
-    logFile.write("all slits RMS\t%.3f\t%d\n" % (RMS, len(offsets)))
+    if len(offsets) > 0:
+        RMS=np.sqrt(np.mean(offsets**2))
+        logFile.write("all slits median\t%.3f\t%d\n" % (np.median(offsets), len(offsets)))
+        logFile.write("all slits RMS\t%.3f\t%d\n" % (RMS, len(offsets)))
+    else:
+        # No sky-based checks were made (e.g. the sky was subtracted earlier, in Kelson mode)
+        logFile.write("all slits median\tNA\t0\n")
+        logFile.write("all slits RMS\tNA\t0\n")
     logFile.close()
     
 #-------------------------------------------------------------------------------------------------------------
@@ -2531,7 +2592,7 @@ def fitProfile(data, mask, borderPix = 4):
     return x0, sigma
     
 #-------------------------------------------------------------------------------------------------------------
-def finalExtraction(data, subFrac = 0.8):
+def finalExtraction(data, subFrac = 0.8, subtractSky = True):
     """This fits for the object trace, so it can vary in y-position along the slit. Does a very simple
     extraction, which still appears to be working better for sky subtraction than the fancier attempts.
     
@@ -2604,7 +2665,7 @@ def finalExtraction(data, subFrac = 0.8):
 
     # New ---
     # Iterative sky subtraction, with the object trace we found
-    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf, iterateProfile = False, throwAwayRows = 0)
+    signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf, iterateProfile = False, throwAwayRows = 0, subtractSky = subtractSky)
 
     # Make 2d sky-subtracted spectrum
     sky2d=np.array([sky]*data.shape[0])
@@ -2703,7 +2764,7 @@ def fitRunningProfile(data):
     return runningProf
 
 #-------------------------------------------------------------------------------------------------------------
-def horneExtraction(data, subFrac = 0.8, gain = 1.0, sigmaClip = 5.0, maxIterations = 5):
+def horneExtraction(data, subFrac = 0.8, gain = 1.0, sigmaClip = 5.0, maxIterations = 5, subtractSky = True):
     """Optimal spectral extraction following Horne (1986; PASP, 98, 609).
 
     The sky is estimated and subtracted using the same iterative solver as the other extraction methods
@@ -2735,9 +2796,12 @@ def horneExtraction(data, subFrac = 0.8, gain = 1.0, sigmaClip = 5.0, maxIterati
     if runningProf is None:
         return None, None, None
 
-    # Estimate the sky (and flag cosmic rays) using the iterative solver, with our object trace
+    # Estimate the sky (and flag cosmic rays) using the iterative solver, with our object trace. If the sky
+    # was already removed earlier (e.g. Kelson mode), subtractSky = False makes this return a zero sky, so
+    # it is not subtracted again here.
     signal, sky, mData=iterativeWeightedExtraction(data, subFrac = subFrac, runningProfile = runningProf,
-                                                    iterateProfile = False, throwAwayRows = 0)
+                                                    iterateProfile = False, throwAwayRows = 0,
+                                                    subtractSky = subtractSky)
 
     # Sky-subtracted data and initial good-pixel mask (0 where iterative extraction flagged CRs/chip gaps)
     sky2d=np.array([sky]*data.shape[0])
