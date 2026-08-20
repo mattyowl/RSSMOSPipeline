@@ -109,8 +109,29 @@ Running the pipeline
    it should be fairly obvious how to use most of the plotting controls. Note that you must click
    ``Redraw plot`` after making changes to either the template redshift or spectral smoothing.
 
-   .. note:: The ``XC Galaxies``, ``XC LRGs`` and ``XC QSOs`` buttons will not work unless you have IRAF
-             and PyRAF installed (and even then the canned settings may not work well on all setups).
+   The ``XC Galaxies``, ``XC LRGs`` and ``XC QSOs`` buttons measure the redshift by cross correlating
+   the spectrum with the SDSS galaxy, luminous red galaxy, or QSO templates respectively, using the
+   method of `Tonry & Davis (1979)
+   <https://ui.adsabs.harvard.edu/abs/1979AJ.....84.1511T/abstract>`_ (this is done in Python - IRAF
+   and RVSAO/XCSAO are no longer needed). The spectra are correlated over the wavelength range set by
+   the ``Min WL`` and ``Max WL`` boxes, with chip gaps, bright sky lines, and the strong telluric
+   absorption bands masked out (these are shaded in grey in the plot afterwards). The result from the
+   template with the highest :math:`R` value is used to set the redshift, the redshift error, and the
+   selected template, and a summary is written in the ``Comments`` box; the results for every template
+   tried are printed in the terminal, together with the next few highest peaks in the correlation
+   function.
+
+   For a noisy spectrum, those other peaks can be almost as strong as the one that wins, and the
+   blind search will sometimes pick the wrong one. When that happens, set the redshift slider to
+   roughly the right value (e.g., by eye, using the spectral feature markers), tick the ``Near z ±``
+   box, and run the cross correlation again - the search is then restricted to the redshift on the
+   slider, plus or minus the amount in the box next to it.
+
+   .. note:: Cross correlation results should always be checked by eye - a low :math:`R` value
+             (:math:`R \lesssim 3`) usually means the redshift is not to be trusted. Note also that
+             :math:`R` measures the correlation peak against the noise in the part of the correlation
+             function that was searched, so :math:`R` values from a narrow ``Near z ±`` search are
+             not comparable with those from a blind search.
 
 
 Wavelength calibration

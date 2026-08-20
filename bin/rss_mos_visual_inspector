@@ -17,6 +17,7 @@ import matplotlib.patches as patches
 from astLib import astSED
 from scipy import optimize
 from scipy import ndimage
+from scipy import fft as sfft
 import os
 import sys
 import glob
@@ -165,6 +166,23 @@ checkSkyLines=[
 # Redshift slider works in integer steps of this size (Qt sliders are integer only)
 REDSHIFT_STEP=0.001
 REDSHIFT_MAX=5.01
+
+# Regions badly affected by telluric absorption - masked out before cross correlating
+TELLURIC_BANDS=[[6860.0, 6930.0], [7590.0, 7710.0]]
+
+# Cross-correlation set-up (see crossCorrelate)
+XC_CONTINUUM_ORDER=5            # order of the polynomial removed from each spectrum before correlating
+XC_APODIZE_FRACTION=0.1         # fraction of each end of a spectrum tapered with a cosine bell
+XC_MIN_OVERLAP_FRACTION=0.25    # fraction of the object spectrum that must overlap with the template
+XC_MIN_OVERLAP_PIX=500          # ... and the minimum number of overlapping pixels, whatever that gives
+XC_MIN_USABLE_PIX=100           # a spectrum with fewer usable pixels than this can't be correlated
+XC_EMISSION_CLIP_SIGMA=3.0      # emission features above this level are clipped if emissionChop = True
+XC_FILTER_MAX_SCALE=0.05        # structure broader than this in ln(wavelength) is filtered out
+XC_FILTER_MIN_SCALE=0.0005      # ... and structure narrower than this is too (i.e., pixel-to-pixel noise)
+XC_SKY_LINE_SIGMA=15.0          # sky lines this far above the sky continuum are masked out
+XC_SKY_LINE_MARGIN=8.0          # ... together with this much extra either side of them (Angstroms)
+XC_NEAR_Z_DEFAULT=0.05          # default half width of the search range used by the 'Near z' option
+XC_NUM_ALTERNATIVES=3           # number of alternative (lower) correlation peaks to report
 
 #------------------------------------------------------------------------------------------------------------
 class App(QtWidgets.QMainWindow):
@@ -340,18 +358,26 @@ class App(QtWidgets.QMainWindow):
         self.redshiftErrorEntry.setText("0.001")
         self.redshiftErrorEntry.setMaximumWidth(90)
         redshiftRow.addWidget(self.redshiftErrorEntry)
-        self.runXCSAOButton=QtWidgets.QPushButton("XC Galaxies")
-        self.runXCSAOButton.setStyleSheet("color: green")
-        self.runXCSAOButton.clicked.connect(self.runXCSAOGalaxies)
-        redshiftRow.addWidget(self.runXCSAOButton)
-        self.runXCSAOLRGsButton=QtWidgets.QPushButton("XC LRGs")
-        self.runXCSAOLRGsButton.setStyleSheet("color: green")
-        self.runXCSAOLRGsButton.clicked.connect(self.runXCSAOLRGs)
-        redshiftRow.addWidget(self.runXCSAOLRGsButton)
-        self.runXCSAOQSOsButton=QtWidgets.QPushButton("XC QSOs")
-        self.runXCSAOQSOsButton.setStyleSheet("color: green")
-        self.runXCSAOQSOsButton.clicked.connect(self.runXCSAOQSOs)
-        redshiftRow.addWidget(self.runXCSAOQSOsButton)
+        self.nearZCheck=QtWidgets.QCheckBox("Near z ±")
+        self.nearZCheck.setToolTip("Restrict the cross correlation search to the region around the "
+                                   "redshift currently set on the slider")
+        redshiftRow.addWidget(self.nearZCheck)
+        self.nearZEntry=QtWidgets.QLineEdit()
+        self.nearZEntry.setText("%.3f" % (XC_NEAR_Z_DEFAULT))
+        self.nearZEntry.setMaximumWidth(70)
+        redshiftRow.addWidget(self.nearZEntry)
+        self.runXCButton=QtWidgets.QPushButton("XC Galaxies")
+        self.runXCButton.setStyleSheet("color: green")
+        self.runXCButton.clicked.connect(self.crossCorrelateGalaxies)
+        redshiftRow.addWidget(self.runXCButton)
+        self.runXCLRGsButton=QtWidgets.QPushButton("XC LRGs")
+        self.runXCLRGsButton.setStyleSheet("color: green")
+        self.runXCLRGsButton.clicked.connect(self.crossCorrelateLRGs)
+        redshiftRow.addWidget(self.runXCLRGsButton)
+        self.runXCQSOsButton=QtWidgets.QPushButton("XC QSOs")
+        self.runXCQSOsButton.setStyleSheet("color: green")
+        self.runXCQSOsButton.clicked.connect(self.crossCorrelateQSOs)
+        redshiftRow.addWidget(self.runXCQSOsButton)
         self.setRedshift(0.5)
 
         # Features to optionally plot - a grid of check boxes, in a scroll area so the window stays sane
@@ -403,15 +429,15 @@ class App(QtWidgets.QMainWindow):
     def decreaseRedshift(self):
         self.setRedshift(self.getRedshift()-REDSHIFT_STEP)
 
-    def runXCSAOGalaxies(self):
+    def crossCorrelateGalaxies(self):
         templatesToInclude=[]
         for temp in templateFileNames:
             tempNum=int(os.path.split(temp)[-1].split("-")[-1].split(".")[0])
             if tempNum >= 23 and tempNum < 29:
                 templatesToInclude.append(temp)
-        self.runXCSAO(templatesToInclude = templatesToInclude, s_emchop = "n")
+        self.runCrossCorrelation(templatesToInclude = templatesToInclude, emissionChop = False)
 
-    def runXCSAOLRGs(self):
+    def crossCorrelateLRGs(self):
         templatesToInclude=[]
         for temp in templateFileNames:
             tempNum=int(os.path.split(temp)[-1].split("-")[-1].split(".")[0])
@@ -419,244 +445,109 @@ class App(QtWidgets.QMainWindow):
             #if tempNum == 23 or tempNum == 28:
             if tempNum == 28:
                 templatesToInclude.append(temp)
-        self.runXCSAO(templatesToInclude = templatesToInclude, s_emchop = "y")
+        self.runCrossCorrelation(templatesToInclude = templatesToInclude, emissionChop = True)
 
-    def runXCSAOQSOs(self):
+    def crossCorrelateQSOs(self):
         templatesToInclude=[]
         for temp in templateFileNames:
             tempNum=int(os.path.split(temp)[-1].split("-")[-1].split(".")[0])
             if tempNum >= 29 and tempNum < 33:
                 templatesToInclude.append(temp)
-        self.runXCSAO(templatesToInclude = templatesToInclude, s_emchop = "n")
+        self.runCrossCorrelation(templatesToInclude = templatesToInclude, emissionChop = False)
 
-    def runXCSAO(self, templatesToInclude = [], s_emchop = "y"):
-        from pyraf import iraf
-        from iraf import rvsao
+    def runCrossCorrelation(self, templatesToInclude = [], emissionChop = False):
+        """Measures the redshift of the currently displayed spectrum by cross correlating it with
+        each of the given SDSS templates (see crossCorrelate), over the wavelength range set by the
+        Min WL, Max WL entries. Chip gaps, bright sky lines, and the strong telluric absorption bands
+        are masked out.
+
+        By default the whole redshift range is searched. If the 'Near z' box is ticked, the search is
+        instead restricted to the redshift on the slider, plus or minus the amount given next to it -
+        use this when the blind search has locked onto the wrong correlation peak (which can happen
+        with noisy spectra, where the alternative peaks reported in the terminal are almost as
+        strong as the one that wins).
+
+        The result with the highest Tonry & Davis (1979) R value wins: the redshift slider, redshift
+        error, and selected template are all set to match, and the results for every template tried
+        are printed to the terminal (note the slider itself only works in steps of REDSHIFT_STEP, so
+        the redshift it shows is rounded - the measured value goes in the Comments box).
+
+        """
 
         xMin=float(self.minWavelengthEntry.text())
         xMax=float(self.maxWavelengthEntry.text())
 
-        # This has to have the open available in IRAF friendly format
-        #if os.path.exists("spec1d_IRAF") == False:
-            #os.makedirs("spec1d_IRAF")
-        irafFileName="toiraf.fits"#"spec1d_IRAF"+os.path.sep+"iraf_boxcar_"+self.objectFileName
-        print(irafFileName)
-        result=None
-        if os.path.exists(irafFileName) == True or self.convertToIRAFFormat() == True:
-            print("--> cross correlating "+irafFileName+" ...")
+        # Restrict the search to be near the redshift on the slider, if asked to
+        zMin, zMax=0.0, REDSHIFT_MAX
+        if self.nearZCheck.isChecked() == True:
+            try:
+                deltaZ=abs(float(self.nearZEntry.text()))
+            except ValueError:
+                deltaZ=XC_NEAR_Z_DEFAULT
+                self.nearZEntry.setText("%.3f" % (deltaZ))
+                print("... the 'Near z' range has to be a number - using +/- %.3f ..." % (deltaZ))
+            zMin=max(0.0, self.getRedshift()-deltaZ)
+            zMax=min(REDSHIFT_MAX, self.getRedshift()+deltaZ)
 
-            # Mask prominent sky emission lines
-            if self.skySED == None:
-                fixbad="n"
-            else:
-                fixbad="y"
-            if fixbad == "y":
-                #print "fixing bad lines"
-                #print "find chip gaps etc."
-                #IPython.embed()
-                #sys.exit()
-                # Old sky emission-line masking
-                #normSkyFlux=self.skySED.flux/self.skySED.flux.max()
-                #threshold=0.1
-                #badPix=np.where(normSkyFlux > threshold)[0]
-                #for i in range(len(badPix)):
-                    #startPixInLine=False
-                    #for line in lines:
-                        #if badPix[i]>=line[0] and badPix[i]<=line[1]:
-                            #startPixInLine=True
-                    #if startPixInLine==False:
-                        #pixCount=1
-                        #if pixCount+i<len(badPix)-1:
-                            #nextPix=badPix[i+pixCount]
-                            #prevPix=badPix[i]
-                            #maxReached=False
-                            #while nextPix<prevPix+2:
-                                #if pixCount+i<len(badPix)-1:
-                                    #prevPix=badPix[i+pixCount]
-                                    #pixCount=pixCount+1
-                                    #nextPix=badPix[i+pixCount]
-                                #else:
-                                    #maxReached=True
-                                    #break
-                            #if maxReached==False:
-                                #lastPix=prevPix
-                            #else:
-                                #lastPix=max(badPix)
-                        #else:
-                            #lastPix=max(badPix)
-                        #lines.append([badPix[i],lastPix])
-                # Write output
-                # Keep it around also so we can plot
-                self.badLines=self.gapsList
-                print(self.gapsList)
-                outFile=open("badlines.dat", "w")
-                #for line in lines:
-                    #self.badLines.append([self.skySED.wavelength[line[0]], self.skySED.wavelength[line[1]]])
-                    #outFile.write(str(self.skySED.wavelength[line[0]])+"\t"+str(self.skySED.wavelength[line[1]])+"\n")
-                # Affected by atmospheric absorption
-                skyLines=[]
-                #skyLines.append([6860., 6930.])
-                #skyLines.append([7590., 7710.])
-                for line in skyLines:
-                    outFile.write(str(line[0])+"\t"+str(line[1])+"\n")
-                    self.badLines.append(line)
-                ## Chip gaps, found earlier
-                #for gap in self.gapsList:
-                    #outFile.write(str(gap[0])+"\t"+str(gap[1])+"\n")
-                #self.badLines=self.badLines+self.gapsList
-                outFile.close()
-                #
+        # Chip gaps (found when the spectrum was loaded), bright sky lines, and telluric absorption
+        # bands are masked out - we keep them in self.badLines so that they are shaded in the plot
+        badRanges=[list(gap) for gap in self.gapsList]+[list(band) for band in TELLURIC_BANDS]+ \
+                   findSkyLineRanges(self.skySED)
+        self.badLines=badRanges
 
-            # Cross correlate with SDSS galaxy templates
-            #for zStep in range(0,9):
-                #z=0.2*zStep
-            for temp in templatesToInclude:
-                # old
-                #rvsao.xcsao(spectra=irafFileName, tempdir=TEMPLATES_DIR, fixbad=, badlines="badlines.dat", vel_init="zguess", czguess=self.getRedshift(), templates=os.path.split(temp)[-1], st_lambda=xMin, end_lambda=xMax, zeropad="y", nsmooth=30, s_emchop="n", t_emchop="n", nzpass=5, minvel=(self.getRedshift()-0.3)*3e5, maxvel=(self.getRedshift()+0.3)*3e5, renormalize="y", ncols=8192, low_bin=10, top_low=20, top_nrun=250, nrun=500, bell_window=0.05, dispmode=2, curmode="n", ablines="ablines.dat", displot="no", logopens="xcsao.log", save_vel="n",  pkfrac=0.5, report_mode=1)
-                # trying to optimise on SALT data
-                #IPython.embed()
-                #sys.exit()
-                #rvsao.xcsao(spectra=irafFileName, tempdir=TEMPLATES_DIR, fixbad="y",
-                            #badlines=os.path.abspath(os.path.curdir)+os.path.sep+"badlines.dat",
-                            #vel_init="zguess", czguess=self.getRedshift(), templates=os.path.split(temp)[-1], st_lambda=xMin, end_lambda=xMax, zeropad="y", nsmooth=30, s_emchop=s_emchop, t_emchop="n", nzpass=20, minvel=(self.getRedshift()-0.2)*LIGHT_SPEED, maxvel=(self.getRedshift()+0.2)*LIGHT_SPEED, renormalize="y", ncols=4096, low_bin=5, top_low=10, top_nrun=4096, nrun=4096, bell_window=0.05, dispmode=2, curmode="n", ablines="ablines.dat", displot="no", logfiles="xcsao.log", save_vel="n",  pkfrac=0.8, report_mode=1)
-                #result=self.parseXCSAOResult()
-                rvsao.xcsao(spectra=irafFileName, tempdir=TEMPLATES_DIR, fixbad="y",
-                            badlines=os.path.abspath(os.path.curdir)+os.path.sep+"badlines.dat",
-                            vel_init="zguess", czguess=self.getRedshift(), templates=os.path.split(temp)[-1], st_lambda=xMin, end_lambda=xMax, zeropad="y", nsmooth=1, s_emchop=s_emchop, t_emchop=s_emchop, nzpass=10, minvel=(self.getRedshift()-0.05)*LIGHT_SPEED, maxvel=(self.getRedshift()+0.05)*LIGHT_SPEED, renormalize="y", ncols=4096, low_bin=5, top_low=10, top_nrun=380, nrun=400, bell_window=0.05, dispmode=2, curmode="n", ablines="ablines.dat", displot="no", logfiles="xcsao.log", save_vel="n",  pkfrac=0.8, report_mode=1, interp_mode="sums")
-                #print self.parseXCSAOResult()
-                #os.remove("xcsao.log")
-                #IPython.embed()
-                #sys.exit()
-            result=self.parseXCSAOResult()
-            os.remove("xcsao.log")
+        # Cross correlate the unsmoothed spectrum, over the wavelength range being displayed
+        rangeMask=np.logical_and(np.greater(self.objSED.wavelength, xMin),
+                                 np.less(self.objSED.wavelength, xMax))
+        objWavelength=self.objSED.wavelength[rangeMask]
+        objFlux=self.unsmoothedObjFlux[rangeMask]
 
-        if result != None:
-            self.setRedshift(result['z'])
-            self.commentsEntry.setText("XCSAO (R=%.3f): " % (result['RVal']))
-            self.templateGroup.button(templateFileNames.index(result['template'])).setChecked(True)
-            self.redshiftErrorEntry.setText("%.6f" % (result['zErr']))
-            print(result)
-            #ipshell()
-            #sys.exit()
+        if self.nearZCheck.isChecked() == True:
+            print("--> cross correlating %s (searching z = %.3f - %.3f) ..." % \
+                  (os.path.split(self.objectSpecFileName)[-1], zMin, zMax))
         else:
-            print("XCSAO failed.")
-        #ipshell()
-        #sys.exit()
-        #del sys.modules['onedspec']
-        #del sys.modules['rvsao']
-        #del sys.modules['pyraf']
-        #del sys.modules['pyraf.iraf']
+            print("--> cross correlating %s ..." % (os.path.split(self.objectSpecFileName)[-1]))
+        bestResult=None
+        QtWidgets.QApplication.setOverrideCursor(QtGui.QCursor(QtCore.Qt.CursorShape.WaitCursor))
+        try:
+            for temp in templatesToInclude:
+                templateIndex=templateFileNames.index(temp)
+                tempSED=self.templates[templateIndex]
+                # NOTE: z0wavelength, z0flux are the rest frame template (the SED objects held in
+                # self.templates get redshifted in place when they are plotted)
+                result=crossCorrelate(objWavelength, objFlux, tempSED.z0wavelength, tempSED.z0flux,
+                                      badRanges = badRanges, zMin = zMin, zMax = zMax,
+                                      emissionChop = emissionChop)
+                if result is None:
+                    print("... %s: no usable correlation peak (check the template overlaps with the"
+                          " spectrum, and that the search range isn't too narrow) ..." % (templateLabels[templateIndex]))
+                    continue
+                result['templateIndex']=templateIndex
+                print("... %s: z = %.5f +/- %.5f (R = %.2f) ..." % (templateLabels[templateIndex],
+                                                                    result['z'], result['zErr'], result['R']))
+                if bestResult is None or result['R'] > bestResult['R']:
+                    bestResult=result
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        if bestResult is not None:
+            templateLabel=templateLabels[bestResult['templateIndex']]
+            self.setRedshift(bestResult['z'])
+            self.templateGroup.button(bestResult['templateIndex']).setChecked(True)
+            self.redshiftErrorEntry.setText("%.6f" % (bestResult['zErr']))
+            self.commentsEntry.setText("XC %s (z = %.5f, R = %.2f): " % (templateLabel, bestResult['z'],
+                                                                        bestResult['R']))
+            print("--> best match: %s, z = %.5f +/- %.5f (R = %.2f)" % (templateLabel, bestResult['z'],
+                                                                        bestResult['zErr'], bestResult['R']))
+            # The next best peaks are worth knowing about: for a noisy spectrum they can be nearly as
+            # strong as the winner, in which case tick 'Near z' and run again with a sensible guess
+            if len(bestResult['alternativeZs']) > 0:
+                print("    (other peaks for %s: %s)" % (templateLabel,
+                      ", ".join(["z = %.5f (%.0f%% of the best peak)" % (z, 100*height/bestResult['peakHeight']) \
+                                 for z, height in bestResult['alternativeZs']])))
+        else:
+            print("Cross correlation failed.")
 
         self.redrawPlot()
-
-
-    def convertToIRAFFormat(self):
-        """Canned convert self.objectFileName spec1d IDL open into IRAF format, stored under 'spec1d_IRAF'
-        dir. Needed for running XCSAO. Note if values < 1 here, we multiply by ridiculous factor to
-        stop xcsao from crashing
-
-        """
-        from pyraf import iraf
-        from iraf import onedspec
-        method="boxcar"
-        baseName="spec1d_IRAF"+os.path.sep+"iraf_"+method+"_"
-        print("--> Converting "+self.objectFileName+" to IRAF format ...")
-        idlfits=pyfits.open(self.objectFileName)
-        if method=="boxcar":
-            tabExts=[1, 2]
-        elif method=="optimal":
-            tabExts=[3, 4]
-        outFileName="toiraf.csv"
-
-        writer=open(outFileName, "wb")
-        skyWriter=open(outFileName.replace("iraf_", "sky_iraf_"), "wb")
-        for tabExt in tabExts:
-            # Sometimes things just don't work as they should ...
-            dataOkay=True
-            try:
-                if len(idlfits[tabExt].data.field('SPEC').shape) > 1:
-                    fluxData=idlfits[tabExt].data.field('SPEC')[0]
-                else:
-                    fluxData=idlfits[tabExt].data.field('SPEC')
-            except IndexError:
-                dataOkay=False
-            if dataOkay == True:
-                if len(idlfits[tabExt].data.field('LAMBDA').shape) > 1:
-                    wavelengthData=idlfits[tabExt].data.field('LAMBDA')[0]
-                else:
-                    wavelengthData=idlfits[tabExt].data.field('LAMBDA')
-                #skyData=idlfits[tabExt].data.field('SKYSPEC')[0]
-                #ipshell()
-                #sys.exit()
-                # xcsao crash preventing when running on fluxed spectra (it should do this itself, of course)
-                if fluxData.mean() < 100:
-                    fluxData=(fluxData/fluxData.mean())*1e6
-                minWavelength=min(wavelengthData)
-                maxWavelength=max(wavelengthData)
-                plotData=[]
-                skyPlotData=[]
-                for i in range(len(fluxData)):
-                    writer.write(str(wavelengthData[i]).encode()+"\t".encode()+str(fluxData[i]).encode()+"\n".encode())
-                    #skyWriter.write(str(wavelengthData[i])+"\t"+str(skyData[i])+"\n")
-                    plotData.append([wavelengthData[i],fluxData[i]])
-                    #skyPlotData.append([wavelengthData[i],skyData[i]])
-        writer.close()
-        skyWriter.close()
-        if os.path.exists(outFileName.replace(".csv", ".fits")) == False:
-            # This might fall over below if there's a dodgy open
-            try:
-                onedspec.rspectext(input=outFileName, output=outFileName.replace(".csv", ".fits"), flux="no", dtype="interp")
-                #onedspec.rspectext(input=outFileName.replace("iraf_", "sky_iraf_"), output=outFileName.replace("iraf_", "sky_iraf_").rstrip("csv")+"fits", flux="no", dtype="interp")
-                #del sys.modules['pyraf']
-                #del sys.modules['pyraf.iraf']
-                return True
-            except:
-                print("... Argh! there's a problem with this open that causes IRAF to crash! ...")
-                print("... skipping ...")
-                #del sys.modules['pyraf']
-                #del sys.modules['pyraf.iraf']
-                return False
-
-    def parseXCSAOResult(self):
-        """Parses xcsao results log open, returns highest R value result
-
-        """
-        with open("xcsao.log", "r") as inFile:
-            lines=inFile.readlines()
-        results=[]
-        objectList=[]
-        currentObject=""
-        bestRVal=0.0
-        bestResult=None
-        for line in lines:
-            # Check for spectrum name change
-            objectChanged=False
-            if line.find("Object:")!=-1:
-                newObject=line[line.find("Object:")+8:].rstrip(" \n")
-                if newObject!=currentObject:
-                    currentObject=newObject
-                    objectChanged=True
-            if objectChanged==True:
-                objectList.append(currentObject)
-            # Extract results -- if we asked to ignore any templates it's done here
-            if line.find("CZ:") != -1:
-                bits=line.split()
-                result={}
-                for i in range(len(bits)):
-                    if bits[i]=="Temp:":
-                        result['template']=str(bits[i+1])
-                    if bits[i]=="R:":
-                        result['RVal']=float(bits[i+1])
-                    if bits[i]=="CZ:":
-                        result['cz']=float(bits[i+1])
-                    if bits[i]=="+/-":
-                        result['czErr']=float(bits[i+1])
-                if result['RVal'] > bestRVal:
-                    result['z']=result['cz']/LIGHT_SPEED
-                    result['zErr']=(result['czErr']/result['cz'])*(result['cz']/LIGHT_SPEED)
-                    bestResult=result
-                    bestRVal=result['RVal']
-        return bestResult
 
     def setPlotFeatures(self):
         """Sets self.plotFeatures according to which spectral features are selected (the plot is only
@@ -725,6 +616,7 @@ class App(QtWidgets.QMainWindow):
             self.objSED=obj['object']
             self.unsmoothedObjFlux=self.objSED.flux[:]
             self.skySED=obj['sky']
+            self.badLines=[]    # these belong to the previous spectrum
 
             self.smoothSpectrum()
 
@@ -783,7 +675,7 @@ class App(QtWidgets.QMainWindow):
             else:
                 oskyflux=None
 
-        # Remove -ve values... helps find chip gaps and get xcsao to work more easily
+        # Remove -ve values... helps find chip gaps and cross correlate more easily
         oflux[np.less(oflux, 0)]=0.
 
         # If there is a chip gap mask given...
@@ -815,7 +707,8 @@ class App(QtWidgets.QMainWindow):
 
         objSED=astSED.SED(wavelength = owavelengthRange, flux = oflux)
         objSED.flux=objSED.flux-objSED.flux.min()   #  make it > 0 everywhere
-        objSED.flux=objSED.flux/objSED.flux.max()
+        if objSED.flux.max() > 0:                   #  ... blank spectra do happen
+            objSED.flux=objSED.flux/objSED.flux.max()
         if np.all(oskyflux) != None:
             skySED=astSED.SED(wavelength = owavelengthRange, flux = oskyflux)
         else:
@@ -864,19 +757,23 @@ class App(QtWidgets.QMainWindow):
         tempSED.redshift(redshift)
         tempSED.flux=tempSED.flux
 
+        # Note the template may not overlap with the wavelength range being plotted at all (e.g., a QSO
+        # template that doesn't extend far enough into the red), in which case it just isn't normalised
         plusMask=np.greater(tempSED.wavelength, xMin)
         minusMask=np.less(tempSED.wavelength, xMax)
         mask=np.logical_and(plusMask, minusMask)
         tempSED.flux=tempSED.flux-tempSED.flux.min()
-        tempSED.flux=tempSED.flux/tempSED.flux[mask].max()
+        if mask.sum() > 0 and tempSED.flux[mask].max() > 0:
+            tempSED.flux=tempSED.flux/tempSED.flux[mask].max()
 
         # In case we don't want to see redward of 10000 Angstroms
         plusMask=np.greater(objSED.wavelength, xMin)
         minusMask=np.less(objSED.wavelength, xMax)
         mask=np.logical_and(plusMask, minusMask)
 
-        objSED.flux=objSED.flux-objSED.flux[mask].min()
-        objSED.flux=objSED.flux/objSED.flux[mask].max()
+        if mask.sum() > 0 and objSED.flux[mask].max() > objSED.flux[mask].min():
+            objSED.flux=objSED.flux-objSED.flux[mask].min()
+            objSED.flux=objSED.flux/objSED.flux[mask].max()
 
         # Norm based on matching flux as closely as possible between template and object spectrum
         # Ignore XX% of each end of spectrum as edges can be weird
@@ -962,6 +859,326 @@ class App(QtWidgets.QMainWindow):
         if self.outFile is not None and self.outFile.closed == False:
             self.outFile.close()
         event.accept()
+
+#------------------------------------------------------------------------------------------------------------
+# Cross correlation redshift measurement (Tonry & Davis 1979 style; replaces the old IRAF/RVSAO XCSAO
+# routines that this script used to call)
+
+def getSpectrumRange(wavelength, flux):
+    """Returns the (min, max) wavelength of the part of the given spectrum that actually contains data
+    (the SDSS templates are zero padded at their ends), or None if there isn't any.
+
+    """
+
+    valid=np.where(np.logical_and(np.isfinite(flux), np.not_equal(flux, 0)))[0]
+    if len(valid) == 0:
+        return None
+
+    return (wavelength[valid.min()], wavelength[valid.max()])
+
+def prepareSpectrumForXC(wavelength, flux, logWavelengthGrid, badRanges = [], emissionChop = False):
+    """Resamples a spectrum onto the given ln(wavelength) grid and prepares it for cross correlation:
+    the continuum is subtracted, bad wavelength ranges (chip gaps, sky lines, telluric bands) are
+    blanked, the ends are tapered with a cosine bell, and the result is normalised to zero mean,
+    unit RMS.
+
+    If emissionChop is True, strong emission features are clipped out (useful when correlating
+    absorption line spectra, e.g., LRGs).
+
+    Returns (flux on the grid, mask flagging the pixels that hold useful data), or (None, None) if
+    the spectrum doesn't have enough usable pixels.
+
+    """
+
+    wavelength=np.array(wavelength, dtype = np.float64)
+    flux=np.array(flux, dtype = np.float64)
+
+    wavelengthRange=getSpectrumRange(wavelength, flux)
+    if wavelengthRange is None:
+        return None, None
+
+    gridWavelength=np.exp(logWavelengthGrid)
+    resampled=np.interp(gridWavelength, wavelength, flux, left = 0.0, right = 0.0)
+    resampled[np.isfinite(resampled) == False]=0.0
+
+    mask=np.logical_and(np.greater_equal(gridWavelength, wavelengthRange[0]),
+                        np.less_equal(gridWavelength, wavelengthRange[1]))
+    for badRange in badRanges:
+        mask[np.logical_and(np.greater_equal(gridWavelength, badRange[0]),
+                            np.less_equal(gridWavelength, badRange[1]))]=False
+    if mask.sum() < XC_MIN_USABLE_PIX:
+        return None, None
+
+    # Subtract the continuum, fitted with a few rounds of sigma clipping so that strong lines
+    # (and any remaining sky residuals) don't drag it around
+    fitMask=np.array(mask)
+    continuum=np.zeros(logWavelengthGrid.shape)
+    for i in range(3):
+        if fitMask.sum() < XC_CONTINUUM_ORDER+2:
+            break
+        polyFit=np.polynomial.Polynomial.fit(logWavelengthGrid[fitMask], resampled[fitMask],
+                                             XC_CONTINUUM_ORDER)
+        continuum=polyFit(logWavelengthGrid)
+        residual=resampled-continuum
+        rms=residual[fitMask].std()
+        if rms == 0:
+            break
+        fitMask=np.logical_and(mask, np.less(abs(residual), 3.0*rms))
+    xcFlux=resampled-continuum
+
+    # Optionally chop out emission lines
+    if emissionChop == True:
+        rms=xcFlux[mask].std()
+        if rms > 0:
+            xcFlux[np.logical_and(mask, np.greater(xcFlux, XC_EMISSION_CLIP_SIGMA*rms))]=0.0
+
+    # Everything we're not using has to be zero, so that it doesn't contribute to the correlation
+    xcFlux[mask]=xcFlux[mask]-xcFlux[mask].mean()
+    xcFlux[mask == False]=0.0
+
+    # Taper the ends with a cosine bell, to stop them ringing in the correlation function
+    indices=np.where(mask)[0]
+    firstIndex, lastIndex=indices.min(), indices.max()
+    numPix=lastIndex-firstIndex+1
+    taperPix=int(round(XC_APODIZE_FRACTION*numPix))
+    if taperPix > 1:
+        taper=np.ones(numPix)
+        ramp=0.5*(1.0-np.cos(np.pi*np.arange(taperPix)/float(taperPix)))
+        taper[:taperPix]=ramp
+        taper[-taperPix:]=ramp[::-1]
+        xcFlux[firstIndex:lastIndex+1]=xcFlux[firstIndex:lastIndex+1]*taper
+
+    rms=xcFlux[mask].std()
+    if rms == 0:
+        return None, None
+    xcFlux=xcFlux/rms
+
+    return xcFlux, mask
+
+def findSkyLineRanges(skySED, sigmaThreshold = XC_SKY_LINE_SIGMA, margin = XC_SKY_LINE_MARGIN):
+    """Finds the wavelength ranges covered by bright sky emission lines in the given sky spectrum.
+    Residuals from these lines can easily be mistaken for object features by the cross correlation
+    (e.g., [OII] 3727 sitting on the 5577 sky line gives a spurious z = 0.495), so they get masked
+    out before correlating.
+
+    Returns a list of [minWavelength, maxWavelength] ranges (in Angstroms).
+
+    """
+
+    if skySED is None:
+        return []
+
+    flux=np.array(skySED.flux, dtype = np.float64)
+    wavelength=np.array(skySED.wavelength, dtype = np.float64)
+    if flux.shape[0] < 10 or np.any(np.isfinite(flux)) == False:
+        return []
+
+    # Sky lines are what's left after taking out the sky continuum, and are found relative to the
+    # scatter of everything else (using the median absolute deviation, so that the lines themselves
+    # don't inflate it)
+    residual=flux-ndimage.median_filter(flux, size = 51)
+    sigma=1.4826*np.median(abs(residual-np.median(residual)))
+    if sigma <= 0:
+        return []
+    lineMask=np.greater(residual, sigmaThreshold*sigma)
+    if lineMask.sum() == 0:
+        return []
+
+    skyLineRanges=[]
+    segmentationMap, numLines=ndimage.label(lineMask)
+    for lineID in range(1, numLines+1):
+        indices=np.where(segmentationMap == lineID)[0]
+        skyLineRanges.append([wavelength[indices.min()]-margin, wavelength[indices.max()]+margin])
+
+    return skyLineRanges
+
+def bandpassFilter(xcFlux, dLogWavelength):
+    """Applies the band-pass filter used for cross correlation (this is the equivalent of the filter
+    applied by XCSAO): everything broader than XC_FILTER_MAX_SCALE in ln(wavelength) is removed, since
+    that is continuum rather than spectral features, as is everything narrower than
+    XC_FILTER_MIN_SCALE, which is noise. Both ends of the pass band are rolled off with a cosine bell,
+    to avoid ringing.
+
+    Returns the filtered spectrum (which is on the same ln(wavelength) grid as the input).
+
+    """
+
+    numPix=xcFlux.shape[0]
+    # Wavenumbers here are in cycles per unit ln(wavelength), so that the cuts are set by the physical
+    # size of the features we want to keep, rather than by the length of the grid we happen to be using
+    k=np.arange(numPix//2+1)/(numPix*dLogWavelength)
+    kLow=1.0/(2.0*XC_FILTER_MAX_SCALE)
+    kHigh=1.0/XC_FILTER_MIN_SCALE
+    filterFunction=np.ones(k.shape[0])
+    lowRamp=np.logical_and(np.greater_equal(k, kLow/2.0), np.less(k, kLow))
+    filterFunction[np.less(k, kLow/2.0)]=0.0
+    filterFunction[lowRamp]=0.5*(1.0-np.cos(np.pi*(k[lowRamp]-kLow/2.0)/(kLow/2.0)))
+    highRamp=np.logical_and(np.greater(k, kHigh), np.less_equal(k, 2.0*kHigh))
+    filterFunction[np.greater(k, 2.0*kHigh)]=0.0
+    filterFunction[highRamp]=0.5*(1.0+np.cos(np.pi*(k[highRamp]-kHigh)/kHigh))
+
+    return sfft.irfft(sfft.rfft(xcFlux)*filterFunction, numPix)
+
+def correlateFFT(objArray, tempArray, fftLength, maxShift):
+    """Correlates two arrays that live on the same grid using FFTs, returning the result for shifts
+    0 ... maxShift, i.e., result[k] = sum_i objArray[i+k]*tempArray[i].
+
+    Both arrays are zero padded out to fftLength, which must be at least as long as the arrays plus
+    maxShift, so that the (circular) FFT correlation doesn't wrap around into the shifts we want.
+
+    """
+
+    correlation=sfft.irfft(sfft.rfft(objArray, fftLength)*np.conj(sfft.rfft(tempArray, fftLength)),
+                           fftLength)
+
+    return correlation[:maxShift+1]
+
+def crossCorrelate(objWavelength, objFlux, tempWavelength, tempFlux, badRanges = [], zMin = 0.0,
+                   zMax = REDSHIFT_MAX, emissionChop = False):
+    """Cross correlates an object spectrum with a rest frame template spectrum, using the method of
+    Tonry & Davis (1979): both spectra are resampled onto a common ln(wavelength) grid (on which a
+    redshift is just a shift), continuum subtracted, apodized, and then correlated using FFTs. The
+    correlation function is normalised over the pixels where the two spectra actually overlap (so that
+    it is a correlation coefficient, comparable between shifts and between templates), and only shifts
+    where a decent fraction of the object spectrum is covered by the template are considered.
+
+    Returns None if the correlation couldn't be done, otherwise a dictionary with keys:
+
+    * 'z'              - the redshift of the highest peak in the correlation function
+    * 'zErr'           - the Tonry & Davis (1979) error estimate on z
+    * 'R'              - the Tonry & Davis (1979) R value (peak height / antisymmetric noise)
+    * 'peakHeight'     - the height of the correlation peak
+    * 'alternativeZs'  - [z, height] for the next highest, well separated peaks
+    * 'zArray'         - redshift corresponding to each shift searched
+    * 'ccfArray'       - the normalised correlation function (NaN where the overlap was too small)
+
+    """
+
+    objWavelength=np.array(objWavelength, dtype = np.float64)
+    objFlux=np.array(objFlux, dtype = np.float64)
+    tempWavelength=np.array(tempWavelength, dtype = np.float64)
+    tempFlux=np.array(tempFlux, dtype = np.float64)
+
+    objRange=getSpectrumRange(objWavelength, objFlux)
+    tempRange=getSpectrumRange(tempWavelength, tempFlux)
+    if objRange is None or tempRange is None:
+        return None
+
+    # Common ln(wavelength) grid, sampled at the finer of the two spectra, spanning both of them
+    dLogWavelength=min(np.median(np.diff(np.log(objWavelength))),
+                       np.median(np.diff(np.log(tempWavelength))))
+    if dLogWavelength <= 0 or np.isfinite(dLogWavelength) == False:
+        return None
+    logMin=np.log(min(objRange[0], tempRange[0]))
+    logMax=np.log(max(objRange[1], tempRange[1]))
+    numPix=int((logMax-logMin)/dLogWavelength)+1
+    logWavelengthGrid=logMin+dLogWavelength*np.arange(numPix)
+
+    objXCFlux, objMask=prepareSpectrumForXC(objWavelength, objFlux, logWavelengthGrid,
+                                            badRanges = badRanges, emissionChop = emissionChop)
+    tempXCFlux, tempMask=prepareSpectrumForXC(tempWavelength, tempFlux, logWavelengthGrid,
+                                              emissionChop = emissionChop)
+    if objXCFlux is None or tempXCFlux is None:
+        return None
+
+    # Band-pass filter both spectra, so that the correlation is driven by spectral features rather
+    # than by leftover continuum or by noise (the filter spills signal outside the region where each
+    # spectrum has data, so we have to blank that again afterwards)
+    objXCFlux=bandpassFilter(objXCFlux, dLogWavelength)
+    objXCFlux[objMask == False]=0.0
+    tempXCFlux=bandpassFilter(tempXCFlux, dLogWavelength)
+    tempXCFlux[tempMask == False]=0.0
+    if objXCFlux[objMask].std() == 0 or tempXCFlux[tempMask].std() == 0:
+        return None
+
+    # Correlate: ccf[k] = sum_i obj[i+k]*temp[i], so a positive shift k means the object features are
+    # redward of the rest frame template ones, i.e., 1+z = exp(k*dLogWavelength). Zero padding out to
+    # numPix+maxShift keeps the (circular) FFT correlation free of wrap around for the shifts we use.
+    maxShift=int(np.log(1.0+zMax)/dLogWavelength)
+    fftLength=sfft.next_fast_len(numPix+maxShift+1)
+    objMaskFlux=objMask.astype(np.float64)
+    tempMaskFlux=tempMask.astype(np.float64)
+    ccf=correlateFFT(objXCFlux, tempXCFlux, fftLength, maxShift)
+    overlap=np.round(correlateFFT(objMaskFlux, tempMaskFlux, fftLength, maxShift))
+
+    # Normalise by the RMS of each spectrum over the pixels that overlap at each shift, rather than
+    # over the whole of each spectrum - otherwise partial overlaps (which happen when the template
+    # doesn't cover the full observed wavelength range) come out with suppressed correlation peaks
+    sumObjSquared=correlateFFT(objXCFlux**2, tempMaskFlux, fftLength, maxShift)
+    sumTempSquared=correlateFFT(objMaskFlux, tempXCFlux**2, fftLength, maxShift)
+
+    shifts=np.arange(maxShift+1)
+    zArray=np.exp(shifts*dLogWavelength)-1.0
+    minOverlap=max(XC_MIN_OVERLAP_FRACTION*objMask.sum(), XC_MIN_OVERLAP_PIX)
+    validMask=np.logical_and(np.greater(overlap, minOverlap),
+                             np.logical_and(np.greater_equal(zArray, zMin), np.less_equal(zArray, zMax)))
+    validMask=np.logical_and(validMask, np.greater(sumObjSquared*sumTempSquared, 0))
+    if validMask.sum() < 10:
+        return None
+    normalisation=np.sqrt(np.where(validMask, sumObjSquared*sumTempSquared, 1.0))
+    ccf=ccf/normalisation
+
+    validIndices=np.where(validMask)[0]
+    firstIndex, lastIndex=validIndices.min(), validIndices.max()
+    peakIndex=validIndices[np.argmax(ccf[validMask])]
+    peakHeight=ccf[peakIndex]
+    if peakHeight <= 0:
+        return None
+
+    # Sub-pixel peak position, from a parabola through the peak and its neighbours
+    peakShift=float(peakIndex)
+    if peakIndex > firstIndex and peakIndex < lastIndex:
+        yMinus, y0, yPlus=ccf[peakIndex-1], ccf[peakIndex], ccf[peakIndex+1]
+        denominator=yMinus-2*y0+yPlus
+        if denominator != 0:
+            offset=0.5*(yMinus-yPlus)/denominator
+            if abs(offset) < 1.0:
+                peakShift=peakShift+offset
+    z=np.exp(peakShift*dLogWavelength)-1.0
+
+    # R value: peak height compared to the RMS of the antisymmetric part of the correlation function
+    # about the peak (Tonry & Davis 1979)
+    numOffsets=min(peakIndex-firstIndex, lastIndex-peakIndex)
+    if numOffsets < 10:
+        return None
+    offsets=np.arange(1, numOffsets+1)
+    offsets=offsets[np.logical_and(validMask[peakIndex+offsets], validMask[peakIndex-offsets])]
+    if offsets.shape[0] < 10:
+        return None
+    antiSymmetric=0.5*(ccf[peakIndex+offsets]-ccf[peakIndex-offsets])
+    sigmaA=np.sqrt(np.mean(antiSymmetric**2))
+    if sigmaA <= 0:
+        return None
+    R=peakHeight/(np.sqrt(2.0)*sigmaA)
+
+    # Error estimate: 3/8 of the peak width, divided by (1+R) (Tonry & Davis 1979)
+    halfHeight=peakHeight/2.0
+    rightIndex=peakIndex
+    while rightIndex < lastIndex and ccf[rightIndex] > halfHeight:
+        rightIndex=rightIndex+1
+    leftIndex=peakIndex
+    while leftIndex > firstIndex and ccf[leftIndex] > halfHeight:
+        leftIndex=leftIndex-1
+    fwhmPix=float(rightIndex-leftIndex)
+    zErr=(1.0+z)*0.375*fwhmPix*dLogWavelength/(1.0+R)
+
+    ccfArray=np.where(validMask, ccf, np.nan)
+
+    # The next highest peaks, at least a peak width away from the ones already found - if one of
+    # these is nearly as high as the best peak, the redshift is ambiguous
+    alternativeZs=[]
+    searchCCF=np.where(validMask, ccf, -np.inf)
+    separationPix=max(int(round(2*fwhmPix)), int(round(np.log(1.005)/dLogWavelength)))
+    nextIndex=peakIndex
+    for i in range(XC_NUM_ALTERNATIVES):
+        searchCCF[max(0, nextIndex-separationPix):nextIndex+separationPix+1]=-np.inf
+        nextIndex=np.argmax(searchCCF)
+        if np.isfinite(searchCCF[nextIndex]) == False:
+            break
+        alternativeZs.append([zArray[nextIndex], ccf[nextIndex]])
+
+    return {'z': z, 'zErr': zErr, 'R': R, 'peakHeight': peakHeight, 'alternativeZs': alternativeZs,
+            'zArray': zArray, 'ccfArray': ccfArray}
 
 #------------------------------------------------------------------------------------------------------------
 # Pair of helper functions for fitting SED normalisation
